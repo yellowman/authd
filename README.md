@@ -18,6 +18,7 @@ This is the initial repository scaffold. It contains:
 - the first-client contract in `docs/BDCMAPS_INTEGRATION.md`;
 - PostgreSQL schema/migration infrastructure;
 - minimal identity models and additive role-permission evaluation;
+- a separate canonical `password_credentials` store using Argon2id;
 - Argon2id password primitives;
 - TOTP primitives;
 - OIDC discovery metadata and route skeletons;
@@ -107,4 +108,6 @@ The central identity model is not protocol-specific:
 user -> roles -> permissions
 ```
 
-OIDC emits role names as `groups`/`roles` claims and application permissions as OAuth scopes. Future RADIUS/TACACS+ frontends must translate the same identity result into protocol attributes; they do not get a second user/role database.
+OIDC emits role names as `groups`/`roles` claims and application permissions as OAuth scopes. Future RADIUS/TACACS+ frontends must translate the same identity result into protocol attributes; they do not get a second user/role database. Their protocol-peer registrations remain separate from OIDC clients.
+
+The primary password remains a one-way Argon2id verifier. RADIUS PAP can verify against it; classic CHAP and MS-CHAP-family methods cannot and do not silently cause authd to retain recoverable passwords or NT hashes. A real legacy requirement gets an explicit, separately enrolled network credential.

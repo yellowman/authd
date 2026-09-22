@@ -5,7 +5,8 @@ finished because discovery JSON exists.
 
 ## Phase 1 — identity and bootstrap
 
-- repository methods for users, roles, permissions, and effective grants;
+- repository methods for users, primary password credentials, roles, permissions, and effective grants;
+- email update semantics that clear `email_verified` when the normalized address changes;
 - first-run bootstrap token and first `system-admin` creation;
 - login sessions and CSRF;
 - password change/reset and forced change;
@@ -20,7 +21,8 @@ finished because discovery JSON exists.
 - login transaction storage;
 - `prompt=none`, `prompt=login`, `max_age`, `login_hint`;
 - permission-scope evaluation;
-- `groups`/`roles` claim projection;
+- `groups`/`roles` claim projection only when each scope is requested and client-allowed;
+- zero-role identity-only authorization coverage;
 - one-use authorization codes;
 - issuer parameter in authorization responses.
 
@@ -53,7 +55,8 @@ instance and an actual bdcmaps instance/test harness.
 ## Later, only from concrete need
 
 - WebAuthn/passkeys;
-- RADIUS frontend;
-- TACACS+ frontend;
+- RADIUS frontend with an explicit method matrix (PAP first; no implicit CHAP/MS-CHAP credentials);
+- protocol-specific RADIUS peer registrations and attribute mappings;
+- TACACS+ frontend with separate client registrations and command mappings;
 - PostgreSQL HA/multiple active authd instances;
 - separate resource-server registration if clients and APIs diverge.

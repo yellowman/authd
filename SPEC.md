@@ -1,6 +1,6 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.2
+## Specification v0.3
 
 Status: initial binding design for implementation.
 
@@ -151,6 +151,14 @@ golang.org/x/crypto
 
 Additional dependencies require a specific documented reason.
 
+## 4.1 Cryptographic implementation boundary
+
+`authd` MUST NOT implement cryptographic primitives. RSA operations, SHA/HMAC, symmetric encryption, secure randomness, Argon2id, and constant-time comparison come from the Go standard library or `golang.org/x/crypto`.
+
+Narrow protocol encodings MAY be implemented locally when doing so avoids a large dependency and the implementation is small and testable. Examples include JWT compact serialization, JWK JSON representation, PKCE encoding, and RFC 6238 TOTP calculation. Such code MUST use library cryptographic primitives exclusively and MUST have specification test vectors and/or independent interoperability coverage.
+
+A dependency is preferred over local code when the alternative would require implementing substantial security-critical protocol machinery rather than merely encoding data around standard cryptographic primitives.
+
 ---
 
 # 5. Authorization Model
@@ -191,6 +199,8 @@ permissions
 ```
 
 The word `groups` is supported as an OIDC claim alias for role names because existing clients commonly consume a `groups` claim. It does not create a fourth authorization object.
+
+Authentication and authorization are distinct. An enabled user with a valid credential and zero roles MAY authenticate to an OIDC client requesting only identity scopes. A zero-role user has zero application permissions and cannot access `system.admin`; role membership is not a prerequisite for proving identity.
 
 ---
 
@@ -293,13 +303,11 @@ username              string
 display_name          string
 email                 string | null
 email_verified        bool
-password_hash         string
 enabled               bool
 force_password_change bool
 created_at
 updated_at
 last_login_at
-password_changed_at
 deleted_at            nullable
 ```
 
@@ -311,6 +319,8 @@ Changing username or email MUST NOT change `sub`.
 
 Deleted IDs MUST never be reused.
 
+Credentials are separate records owned by the identity core rather than fields that define the user object. A user MAY exist without a primary password credential, but local password authentication requires one. This separation is intentional so future protocol-specific credentials can be added without making the canonical user record or primary SSO password protocol-specific.
+
 ## 8.1 Username
 
 Username comparison is case-insensitive.
@@ -319,9 +329,15 @@ The original normalized display form may be retained.
 
 Usernames are unique among non-deleted users.
 
-## 8.2 Password Storage
+### 8.1.1 Email verification state
 
-Passwords use Argon2id.
+`email_verified` defaults to `false`. Version 1 has no email-delivered verification workflow. An administrator MAY explicitly assert an email as verified; absent that assertion, `authd` MUST NOT emit `email_verified=true`.
+
+Changing a user's email address to a different normalized value MUST clear `email_verified` to `false`. Clearing the email removes both `email` and `email_verified` from claims that depend on the `email` scope.
+
+## 8.2 Primary Password Credential
+
+The canonical local password credential uses Argon2id and is stored separately from the `users` row.
 
 The encoded password record contains the parameters needed for verification and future upgrades.
 
@@ -371,6 +387,28 @@ Changing a password MUST revoke all refresh-token families for that user.
 An administrator password reset defaults to revoking provider sessions as well.
 
 Disabling a user MUST revoke all provider sessions and refresh-token families automatically.
+
+## 8.4 Credential capabilities and legacy AAA methods
+
+Argon2id is the canonical verifier for the primary password. It is a one-way verifier, not recoverable password material. Protocol adapters MUST declare what credential material each authentication method requires.
+
+Methods that deliver the submitted password to `authd` MAY verify it directly against the canonical Argon2id credential. This includes local web login and RADIUS PAP after the RADIUS server has recovered the submitted `User-Password`. EAP methods that intentionally deliver a password inside a protected tunnel may use the same verifier when their protocol implementation is explicitly supported.
+
+Methods that require computation from the original password cannot be satisfied from an Argon2id verifier. Classic CHAP is therefore unsupported by the canonical password credential. Methods such as MS-CHAPv2 require NT-hash/password-equivalent material and are likewise unsupported by default.
+
+`authd` MUST NOT silently generate or retain weaker password-equivalent material for every user merely to advertise protocol compatibility. If a concrete deployment requires additional credential material, it MUST be modeled as an explicit credential type with all of the following:
+
+```text
+explicit enrollment
+explicit supported protocol/authentication method
+documented storage representation
+administrative visibility
+audit events
+independent revocation
+security warning when weaker than the canonical Argon2id credential
+```
+
+Where practical, a separate network-access credential SHOULD be enrolled rather than making the user's primary SSO password recoverable or retaining an NT hash for it. Reversible protocol-specific secrets MUST be encrypted under deployment master-key material and MUST never replace the canonical Argon2id verifier.
 
 ---
 
@@ -487,7 +525,7 @@ The provider MUST NOT grant an application scope that the client did not request
 
 ## 10.1 groups and roles
 
-`groups` and `roles` are claim-request scopes over the same role membership.
+`groups` and `roles` are claim-request scopes over the same role membership. Neither claim is released merely because a user has roles. The corresponding scope MUST be both requested by the client and explicitly allowed for that client.
 
 If `groups` is requested and allowed:
 
@@ -507,13 +545,15 @@ If `roles` is requested and allowed:
 
 A client may request either or both.
 
+If both scopes are requested and allowed, both claims MAY be emitted and MUST represent the same current local role membership. Client input can never inject role names into either claim.
+
 This compatibility alias is intentional. It allows applications such as `bdcmaps` to consume conventional `groups` without introducing a separate group-management model.
 
 ---
 
-# 11. Clients
+# 11. OIDC/OAuth Clients
 
-Clients are created manually through the administration interface.
+Clients are created manually through the administration interface. The `clients` model and tables in v1 are specifically OIDC/OAuth client registrations; they are not a polymorphic registry for every future protocol peer. RADIUS NAS registrations, TACACS+ clients, and other protocol peers receive protocol-specific records when those adapters are implemented.
 
 There is no Dynamic Client Registration endpoint in v1.
 
@@ -1262,7 +1302,9 @@ List shows:
 Username
 Display Name
 Email
+Email Verified
 Enabled
+Primary Password
 Roles
 MFA
 Last Login
@@ -1275,7 +1317,7 @@ Create User
 Edit User
 Enable
 Disable
-Set Password
+Set/Replace Primary Password
 Force Password Change
 Assign Roles
 Reset MFA
@@ -1405,7 +1447,7 @@ If no administrator exists:
 1. Generate a random one-time bootstrap token.
 2. Print the setup URL and token to the service console.
 3. Enable `/setup` for bootstrap only.
-4. Allow creation of exactly one initial administrator.
+4. Allow creation of exactly one initial administrator and primary password credential.
 5. Assign `system-admin`.
 6. Invalidate the token atomically.
 7. Disable bootstrap once an administrator exists.
@@ -1435,13 +1477,14 @@ The initial schema contains:
 
 ```text
 users
+password_credentials
 roles
 permissions
 user_roles
 role_permissions
 clients
 client_redirect_uris
-client_post_logout_uris
+client_logout_uris
 client_identity_scopes
 client_permissions
 authorization_codes
@@ -1478,7 +1521,7 @@ bootstrap tokens
 
 High-entropy random bearer values may be stored as SHA-256 hashes because they are already computationally unguessable.
 
-User passwords use Argon2id.
+Canonical primary passwords use Argon2id and are stored in `password_credentials`, separate from the `users` row.
 
 The following require reversible encryption and MUST be encrypted with a deployment master key held outside PostgreSQL:
 
@@ -1486,6 +1529,7 @@ The following require reversible encryption and MUST be encrypted with a deploym
 TOTP seeds
 signing private keys
 future protocol shared secrets if the service ever owns them
+explicitly enrolled protocol-specific recoverable credentials, if any
 ```
 
 The master key file MUST be readable only by the service account.
@@ -1600,6 +1644,9 @@ user.enabled
 user.disabled
 user.deleted
 user.password_reset
+credential.enrolled
+credential.rotated
+credential.revoked
 
 role.created
 role.updated
@@ -1785,7 +1832,35 @@ store plaintext copies of user passwords
 bypass account enabled/disabled state
 ```
 
-## 38.1 RADIUS Direction
+## 38.1 Protocol-specific client registrations
+
+Protocol peers are not OIDC clients merely because they authenticate users. Each protocol gets the smallest registration model required by that protocol. For example:
+
+```text
+OIDC/OAuth client
+    client_id
+    client authentication method/secret
+    redirect URIs
+    logout URIs
+    allowed scopes/permissions
+
+RADIUS NAS / peer
+    source identity/address or TLS identity
+    transport profile
+    RADIUS shared secret when the selected transport requires one
+    allowed authentication methods
+    role/permission -> attribute mappings
+
+TACACS+ client
+    source/TLS identity
+    transport profile
+    shared secret only when the selected transport requires it
+    service/command mappings
+```
+
+Future schema SHOULD therefore use separate records such as `radius_clients` and `tacacs_clients`. Do not add a `protocol` discriminator to the OIDC `clients` table and turn it into a generic configuration bag.
+
+## 38.2 RADIUS Direction
 
 Potential uses:
 
@@ -1795,11 +1870,26 @@ router administrative login where RADIUS is appropriate
 role/permission -> VLAN/filter/vendor attributes
 ```
 
-RADIUS implementation must explicitly choose supported authentication methods. `authd` will not weaken Argon2id password storage to satisfy legacy methods that require recoverable passwords or NT hashes without an explicit separate security decision.
+RADIUS implementation MUST explicitly choose supported authentication methods. The initial credential matrix is:
 
-RADIUS over TLS/RadSec should be preferred where deployment support permits it.
+```text
+method                 canonical Argon2id credential
+RADIUS PAP             supported
+classic CHAP           not supported
+MS-CHAP / MS-CHAPv2    not supported
+EAP-TTLS with inner PAP potentially supported by a future explicit EAP implementation
+EAP-TLS                certificate credential; separate future credential type
+```
 
-## 38.2 TACACS+ Direction
+For PAP, the NAS does not need to understand Argon2id. The RADIUS frontend recovers the submitted password from the RADIUS request and asks the identity core to verify that candidate password against the Argon2id verifier.
+
+Classic CHAP requires access to the original password to compute the expected challenge response and therefore cannot use the canonical verifier. MS-CHAP-family methods require weaker password-equivalent material such as an NT hash and are disabled unless a concrete deployment explicitly introduces the corresponding separate credential type.
+
+Protected RADIUS transport SHOULD be preferred where deployment support permits it. Implementations SHOULD evaluate RADIUS/TLS and RADIUS/1.1 rather than assuming classic RADIUS/UDP with its legacy shared-secret/MD5 construction is the desired transport.
+
+RADIUS authorization attributes are declarative mappings from current roles/permissions to protocol attributes. They are not executable policy code.
+
+## 38.3 TACACS+ Direction
 
 Potential uses:
 
@@ -1810,6 +1900,8 @@ accounting
 ```
 
 Command authorization should map explicit configured role/permission facts into TACACS+ authorization results. Do not add a general-purpose policy language unless real command policy cannot be represented cleanly by data rows.
+
+Where both client and server support it, TACACS+ over TLS 1.3 SHOULD be preferred over the legacy TACACS+ obfuscation mechanism.
 
 ---
 
@@ -1897,7 +1989,12 @@ The following are release-blocking.
 14. Client-supplied parameters cannot create an open redirect.
 15. OIDC `sub` does not change when username/email changes.
 16. `groups` and `roles` claims contain only current local role names and cannot be injected by client input.
-17. A future RADIUS/TACACS+ adapter cannot bypass the same enabled/disabled user state and role/permission resolver.
+17. `groups` or `roles` is emitted only when its scope was both requested and allowed for the client.
+18. A zero-role enabled user may authenticate for identity-only use, but receives no application permissions and no administrative access.
+19. The canonical primary password is never stored reversibly and has no NT-hash/password-equivalent companion by default.
+20. Additional weaker or recoverable protocol credentials require explicit enrollment and cannot be silently derived during normal password changes.
+21. A future RADIUS/TACACS+ adapter cannot bypass the same enabled/disabled user state and role/permission resolver.
+22. RADIUS and TACACS+ peer registrations remain protocol-specific and cannot be smuggled into the OIDC client model.
 
 ---
 
@@ -1922,9 +2019,10 @@ login_hint
 PKCE
 ID token validation
 nonce
-email claims
-groups claim
-roles claim
+email claims, including verified/unverified transitions
+groups claim requested+allowed release
+roles claim requested+allowed release
+zero-role identity-only authentication
 userinfo
 refresh
 refresh rotation
@@ -2004,6 +2102,13 @@ PKCE / RFC 7636
 OAuth Authorization Server Metadata / RFC 8414
 OAuth Authorization Server Issuer Identification / RFC 9207
 OAuth 2.0 Security Best Current Practice / RFC 9700
+
+Future protocol adapters, when implemented:
+RADIUS / RFC 2865 plus applicable updates
+EAP-TTLS / RFC 5281 when that method is implemented
+RADIUS/TLS / RFC 6614 plus applicable updates including RFC 9765
+TACACS+ / RFC 8907 plus applicable updates
+TACACS+ over TLS 1.3 / RFC 9887 when supported
 ```
 
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.

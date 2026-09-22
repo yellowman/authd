@@ -31,3 +31,19 @@ make verify
 
 Then run the migration/startup path against the disposable development database
 before building further protocol behavior.
+
+## 2026-09-21 credential-model/spec delta
+
+After separating canonical password credentials from `users` and tightening the
+future RADIUS/TACACS+ contract:
+
+- `git diff --check`: PASS.
+- whole-tree `go test ./...` against local signature-compatible stubs for pgx
+  and x/crypto: PASS.
+- whole-tree `go vet ./...` against the same stubs: PASS.
+- new schema invariant tests cover `password_credentials` separation and forbid
+  turning the OIDC client schema into a polymorphic protocol registry.
+
+The sandbox still has Go 1.23.2 and cannot download the repository's Go 1.25
+toolchain or real modules, so a real dependency-backed `make verify` remains an
+external validation gate.

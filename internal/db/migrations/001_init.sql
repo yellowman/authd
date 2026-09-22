@@ -6,19 +6,29 @@ CREATE TABLE users (
     display_name text NOT NULL DEFAULT '',
     email text,
     email_verified boolean NOT NULL DEFAULT false,
-    password_hash text NOT NULL,
     enabled boolean NOT NULL DEFAULT true,
     force_password_change boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     last_login_at timestamptz,
-    password_changed_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,
     CONSTRAINT users_username_nonempty CHECK (btrim(username) <> ''),
     CONSTRAINT users_email_nonempty CHECK (email IS NULL OR btrim(email) <> '')
 );
 CREATE UNIQUE INDEX users_username_unique ON users ((lower(username))) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX users_email_unique ON users ((lower(email))) WHERE email IS NOT NULL AND deleted_at IS NULL;
+
+-- Credentials are deliberately separate from identity rows. The canonical
+-- primary password is an Argon2id verifier. Future protocol-specific
+-- credentials (if a real deployment requires them) receive their own explicit
+-- tables/migrations rather than adding recoverable secret material here.
+CREATE TABLE password_credentials (
+    user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    password_hash text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    changed_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT password_credentials_hash_nonempty CHECK (btrim(password_hash) <> '')
+);
 
 CREATE TABLE permissions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

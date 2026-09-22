@@ -28,6 +28,17 @@ Do not add a web framework, ORM, frontend framework, dependency-injection
 framework, generic plugin framework, policy engine, Redis client, or message bus
 without a demonstrated requirement.
 
+Do not implement cryptographic primitives. Use the standard library or x/crypto.
+Small protocol encodings around those primitives may remain local when covered by
+test vectors/interoperability tests.
+
+The canonical password credential is Argon2id only. Do not add recoverable primary
+passwords, NT hashes, or other password-equivalent material to satisfy a protocol.
+A concrete legacy requirement gets a separate explicit credential type.
+
+OIDC clients are OIDC clients. Future RADIUS/TACACS+ peers get separate protocol
+registration records rather than a discriminator on the existing client table.
+
 ## Security invariants
 
 - Exact redirect URI matching.

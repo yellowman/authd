@@ -32,6 +32,51 @@ OIDC is implemented in-process and is the authoritative web SSO interface.
 Application permissions are OAuth scopes. `groups` and `roles` are views of the
 same role assignments.
 
+## Protocol peer registrations
+
+OIDC/OAuth clients, RADIUS peers, and TACACS+ clients are distinct protocol
+objects. They share users and authorization facts; they do not share a generic
+"client" configuration row.
+
+```text
+OIDC client     -> client ID, redirect/logout URIs, scopes, client auth
+RADIUS peer     -> source/TLS identity, transport, auth methods, attributes
+TACACS+ client  -> source/TLS identity, transport, service/command mappings
+```
+
+When those adapters are implemented, add explicit `radius_clients` /
+`tacacs_clients`-style records. Do not add a protocol discriminator to the OIDC
+client table.
+
+## Credential capability rule
+
+The canonical password credential is an Argon2id verifier. It is deliberately
+not recoverable. Authentication methods must declare what credential material
+they require.
+
+```text
+method                       canonical Argon2id
+local web password           yes
+RADIUS PAP                   yes
+classic CHAP                 no
+MS-CHAP / MS-CHAPv2          no
+EAP-TTLS + inner PAP         possible future method
+EAP-TLS                      separate certificate credential
+```
+
+PAP compatibility does **not** mean the NAS supports Argon2id. The RADIUS
+frontend recovers the candidate password from the PAP request and calls the
+normal Argon2id verifier.
+
+Classic CHAP requires the original password to calculate the expected response.
+MS-CHAP-family methods require NT-hash/password-equivalent material. Neither can
+be derived from Argon2id.
+
+If a real deployment requires weaker or recoverable credential material, it is
+a separate explicitly enrolled credential with its own storage representation,
+admin visibility, audit events, revocation, and warning. Prefer a separate
+network credential rather than weakening the primary SSO password.
+
 ## RADIUS
 
 A useful first RADIUS target is authentication/authorization for network access
@@ -42,26 +87,25 @@ Preferred initial shape:
 ```text
 RADIUS Access-Request
         │
+        ├── identify configured RADIUS peer
         ├── identify user
-        ├── verify supported credential method
+        ├── verify explicitly supported credential method
         ├── evaluate roles/permissions
         └── return explicit RADIUS attributes
 ```
 
-Important credential boundary:
+Initial method policy:
 
-- RADIUS PAP can be verified against authd's Argon2id password hash because the
-  server receives the recovered password and can perform normal verification.
-- CHAP/MS-CHAP/MS-CHAPv2 and similar mechanisms may require password-equivalent
-  material that cannot be derived from an Argon2id verifier.
-- authd MUST NOT store weaker password material by default merely to claim those
-  mechanisms are supported.
-- If a real deployment later requires such a method, it gets an explicit
-  credential type, threat analysis, storage rule, and UI warning.
-- Prefer protected transport such as RadSec where the equipment and deployment
-  support it.
+- PAP can use the canonical Argon2id verifier.
+- classic CHAP is disabled with the canonical credential.
+- MS-CHAP/MS-CHAPv2 are disabled unless a deployment deliberately adds the
+  required separate credential representation.
+- EAP methods are not implied by "RADIUS support"; each EAP method is an
+  explicit implementation decision.
+- protected transport is preferred. Evaluate RADIUS/TLS and RADIUS/1.1 when
+  client support permits it rather than defaulting blindly to classic UDP.
 
-RADIUS authorization attributes should be explicit mappings from roles or
+RADIUS authorization attributes are explicit mappings from roles or
 permissions, not free-form policy code hidden in the protocol server.
 
 ## TACACS+
@@ -84,6 +128,9 @@ to TACACS+ authentication, service authorization, and command authorization.
 Do not add a general policy DSL preemptively. Start with declarative mappings
 that are visible in the admin UI. Promote to a richer policy model only if real
 network-device authorization rules cannot be represented cleanly.
+
+Where client support permits it, TACACS+ over TLS 1.3 is preferred over the
+legacy TACACS+ obfuscation mechanism.
 
 ## Process boundary
 

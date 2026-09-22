@@ -58,6 +58,7 @@ A later RADIUS or TACACS+ listener may live in the same binary if the implementa
 
 ```text
 users
+  ├── password_credentials (canonical Argon2id verifier)
   └── user_roles
         └── roles
               └── role_permissions
@@ -116,9 +117,11 @@ permission=network.vpn.connect
   -> RADIUS Access-Accept + configured VLAN/filter attributes
 ```
 
-Protocol-specific attributes belong in adapter configuration records keyed by role/permission/client/service. They do not belong as columns on the user table.
+Protocol-specific attributes belong in adapter configuration records keyed by role/permission/protocol peer/service. They do not belong as columns on the user table. OIDC clients, RADIUS peers, and TACACS+ clients remain separate registration types rather than sharing a polymorphic client table.
 
-Some RADIUS methods require credential representations that cannot be derived from Argon2id password hashes (for example legacy challenge/response methods). `authd` must not weaken its primary password storage just to support them. Initial RADIUS support should prefer methods compatible with secure credential verification (for example RADIUS over TLS plus PAP inside the protected channel, or EAP methods whose verifier design is explicitly supported). Any exception requires a separate threat-model decision.
+The canonical password credential is a one-way Argon2id verifier stored separately from the user row. RADIUS PAP can use it because the RADIUS frontend obtains the submitted password and performs normal verification. Classic CHAP cannot: it requires the original password to calculate the expected challenge response. MS-CHAP-family methods require NT-hash/password-equivalent material. `authd` must not weaken the primary password store or silently retain those representations just to support legacy methods. A real requirement gets a separately enrolled protocol credential with explicit storage and threat-model rules.
+
+Protected network-AAA transports should be preferred when client support permits them, including current RADIUS/TLS/RADIUS/1.1 profiles and TACACS+ over TLS 1.3.
 
 ## Dependency rule
 
