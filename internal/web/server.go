@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type Server struct {
 	templates   *template.Template
 	oidc        *oidc.HTTP
 }
+type clientIPContextKey struct{}
 type pageData struct {
 	Title, Issuer, Section, View, CSRF, Error, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
 	Development                                                                                                  bool
@@ -42,8 +44,10 @@ type pageData struct {
 	Sessions                                                                                                     []identity.Session
 	SelectedUser                                                                                                 *identity.User
 	SelectedRole                                                                                                 *identity.Role
+	SelectedPermission                                                                                           *identity.Permission
 	OIDCClients                                                                                                  []oidc.Client
 	SelectedClient                                                                                               *oidc.Client
+	SigningKeys                                                                                                  []oidc.SigningKey
 	ClientSecret                                                                                                 string
 	RecoveryCodes                                                                                                []string
 	DefaultAccessTokenTTL                                                                                        int64
@@ -62,8 +66,9 @@ func New(cfg config.Config, auth *identity.Service, health func(context.Context)
 			}
 			return false
 		},
-		"when": func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") },
-		"list": func(values ...string) []string { return values },
+		"when":    func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") },
+		"version": func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) },
+		"list":    func(values ...string) []string { return values },
 	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
@@ -92,24 +97,33 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /login", s.loginPost)
 	mux.HandleFunc("POST /session/logout", s.logout)
 	mux.HandleFunc("GET /account", s.account)
+	mux.HandleFunc("POST /account/profile", s.editOwnProfile)
 	mux.HandleFunc("POST /account/password", s.changePassword)
 	mux.HandleFunc("POST /account/sessions/revoke", s.revokeSession)
 	mux.HandleFunc("POST /account/mfa/begin", s.beginTOTP)
 	mux.HandleFunc("POST /account/mfa/confirm", s.confirmTOTP)
 	mux.HandleFunc("POST /account/mfa/remove", s.removeTOTP)
+	mux.HandleFunc("POST /account/mfa/recovery", s.regenerateRecoveryCodes)
 	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/admin/", http.StatusSeeOther) })
 	mux.HandleFunc("GET /admin/{$}", s.admin)
 	mux.HandleFunc("POST /admin/users/create", s.createUser)
 	mux.HandleFunc("POST /admin/users/save", s.editUser)
 	mux.HandleFunc("POST /admin/users/password", s.resetPassword)
+	mux.HandleFunc("POST /admin/users/mfa-reset", s.resetUserMFA)
+	mux.HandleFunc("POST /admin/users/delete", s.deleteUser)
 	mux.HandleFunc("POST /admin/roles/save", s.saveRole)
+	mux.HandleFunc("POST /admin/roles/delete", s.deleteRole)
 	mux.HandleFunc("POST /admin/permissions/create", s.createPermission)
+	mux.HandleFunc("POST /admin/permissions/save", s.savePermission)
+	mux.HandleFunc("POST /admin/permissions/delete", s.deletePermission)
 	mux.HandleFunc("POST /admin/clients/create", s.createClient)
 	mux.HandleFunc("POST /admin/clients/save", s.saveClient)
 	mux.HandleFunc("POST /admin/clients/secret", s.rotateClientSecret)
+	mux.HandleFunc("POST /admin/clients/delete", s.deleteClient)
+	mux.HandleFunc("POST /admin/keys/rotate", s.rotateSigningKey)
 	mux.HandleFunc("POST /admin/sessions/revoke", s.revokeSession)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/account", http.StatusSeeOther) })
-	return s.securityHeaders(s.requestLog(mux)), nil
+	return s.securityHeaders(s.requestLog(s.clientAddress(mux))), nil
 }
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -305,14 +319,63 @@ func safeReturn(path string) string {
 	}
 }
 func auditInfo(w http.ResponseWriter, r *http.Request) identity.Audit {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if net.ParseIP(host) == nil {
-		host = ""
-	}
+	host, _ := r.Context().Value(clientIPContextKey{}).(string)
 	return identity.Audit{IP: host, RequestID: w.Header().Get("X-Request-ID")}
+}
+func trustedAddress(addr netip.Addr, trusted []netip.Prefix) bool {
+	for _, prefix := range trusted {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+func peerAddress(remote string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(host))
+	return addr, err == nil
+}
+func resolvedClientIP(r *http.Request, trusted []netip.Prefix) string {
+	peer, ok := peerAddress(r.RemoteAddr)
+	if !ok {
+		return ""
+	}
+	if len(trusted) == 0 || !trustedAddress(peer, trusted) {
+		return peer.String()
+	}
+	raw := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if raw == "" {
+		return peer.String()
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 32 {
+		return peer.String()
+	}
+	chain := make([]netip.Addr, 0, len(parts))
+	for _, part := range parts {
+		addr, err := netip.ParseAddr(strings.TrimSpace(part))
+		if err != nil {
+			// A malformed chain is not partially trusted. Falling back to the
+			// direct peer prevents attacker-controlled ambiguity from entering
+			// rate-limit or audit keys.
+			return peer.String()
+		}
+		chain = append(chain, addr)
+	}
+	candidate := peer
+	for i := len(chain) - 1; i >= 0 && trustedAddress(candidate, trusted); i-- {
+		candidate = chain[i]
+	}
+	return candidate.String()
+}
+func (s *Server) clientAddress(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := resolvedClientIP(r, s.cfg.TrustedProxies)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientIPContextKey{}, ip)))
+	})
 }
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

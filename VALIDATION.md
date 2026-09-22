@@ -1,4 +1,4 @@
-# v0.5 validation record
+# v0.6 validation record
 
 This is a source-delivery validation record, not a production signoff or an OIDC
 conformance certificate. No replacement pgx or x/crypto module is used by the
@@ -8,7 +8,7 @@ reported checks.
 
 The installed toolchain is Go 1.23.2. The production module requires Go 1.25 and
 its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.5 tree:
+Within that boundary, the following checks passed on the current v0.6 tree:
 
 | Check | Result and scope |
 |---|---|
@@ -45,6 +45,20 @@ The OIDC regression suite now exercises, among other cases:
 - signing-key rotation while old public verification remains available;
 - RFC 7009 request rejection when the required token is absent.
 
+
+The v0.6 lifecycle regression source additionally covers:
+
+- final-administrator protection on user and role deletion;
+- soft user deletion removing primary credential, role grants, sessions and refresh capability;
+- reference-safe permission rename/delete;
+- MFA recovery-code replacement and administrative authenticator reset;
+- destructive OIDC-client deletion and grant-state cascades;
+- admin signing-key listing without private ciphertext and audited key rotation;
+- expiration cleanup for sessions, pending enrollment, bootstrap state, grant state and bounded audit retention;
+- self-service profile routing plus fresh-session database enforcement source;
+- trusted-proxy source resolution, including untrusted-peer spoof rejection and malformed-chain fail-closed behavior.
+- stale user, role, permission, and OIDC-client edit versions rejected by the PostgreSQL transaction source.
+
 The real-PostgreSQL integration source additionally covers durable authorization
 requests, one-use code consumption, refresh rotation/reuse revocation, token audit
 events, refusal to grant `system.admin` as an application permission, and signing
@@ -79,7 +93,7 @@ environment. Therefore the following have **not** passed here:
 - backup/restore, master-key rotation, HA or production deployment qualification.
 
 The prior v0.4 Chromium fixture review covered the base Liminal-derived login,
-account and administration layout. v0.5's restructured Clients branch is covered
+account and administration layout. v0.6's lifecycle/Clients/Keys branches is covered
 by template rendering tests here, but it has not been re-reviewed in a live
 browser/daemon environment and is not claimed as such.
 

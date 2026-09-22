@@ -12,6 +12,7 @@
       <a class="rail-item {{if eq .View "permissions"}}active{{end}}" href="/admin/?view=permissions" aria-label="Permissions" title="Permissions">P</a>
       <a class="rail-item {{if eq .View "clients"}}active{{end}}" href="/admin/?view=clients" aria-label="Clients" title="OIDC clients">C</a>
       <a class="rail-item {{if eq .View "sessions"}}active{{end}}" href="/admin/?view=sessions" aria-label="Sessions" title="Sessions">S</a>
+      <a class="rail-item {{if eq .View "keys"}}active{{end}}" href="/admin/?view=keys" aria-label="Signing keys" title="Signing keys">K</a>
       <a class="rail-item {{if eq .View "audit"}}active{{end}}" href="/admin/?view=audit" aria-label="Audit" title="Audit">E</a>
     </nav>
     <a class="rail-item rail-bottom" href="/account" aria-label="Your account" title="Your account">@</a>
@@ -21,7 +22,7 @@
     <header class="topbar">
       <div>
         <div class="eyebrow">AUTHD / IDENTITY ADMINISTRATION</div>
-        <h1>{{if eq .View "users"}}Users{{else if eq .View "roles"}}Roles{{else if eq .View "permissions"}}Permissions{{else if eq .View "clients"}}OIDC Clients{{else if eq .View "sessions"}}Sessions{{else}}Audit{{end}}</h1>
+        <h1>{{if eq .View "users"}}Users{{else if eq .View "roles"}}Roles{{else if eq .View "permissions"}}Permissions{{else if eq .View "clients"}}OIDC Clients{{else if eq .View "sessions"}}Sessions{{else if eq .View "keys"}}Signing Keys{{else}}Audit{{end}}</h1>
       </div>
       <div class="topbar-meta"><code>{{.Issuer}}</code><a href="/account">{{.Session.User.Username}}</a></div>
     </header>
@@ -33,7 +34,7 @@
         <p>One identity catalog serves local login and OIDC clients. Permissions are additive and application permissions become OAuth scopes.</p>
       </section>
       <nav class="section-tabs" aria-label="Administration sections">
-        <a href="/admin/?view=users">Users</a><a href="/admin/?view=roles">Roles</a><a href="/admin/?view=permissions">Permissions</a><a href="/admin/?view=clients">Clients</a><a href="/admin/?view=sessions">Sessions</a><a href="/admin/?view=audit">Audit</a>
+        <a href="/admin/?view=users">Users</a><a href="/admin/?view=roles">Roles</a><a href="/admin/?view=permissions">Permissions</a><a href="/admin/?view=clients">Clients</a><a href="/admin/?view=sessions">Sessions</a><a href="/admin/?view=keys">Keys</a><a href="/admin/?view=audit">Audit</a>
       </nav>
 
       {{if eq .View "users"}}
@@ -41,14 +42,14 @@
         <div class="section-heading"><h2>Local users</h2><span class="muted small">{{len .Admin.Users}} shown</span></div>
         <div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0">
           <table><thead><tr><th>User</th><th>Email</th><th>Roles</th><th>Status</th><th>Action</th></tr></thead><tbody>
-          {{range .Admin.Users}}<tr><td><strong>{{.Username}}</strong><small class="block muted">{{.DisplayName}}</small></td><td>{{.Email}}{{if .EmailVerified}}<small class="block good">Administrator verified</small>{{end}}</td><td>{{join .Roles ", "}}</td><td>{{if .Enabled}}Enabled{{else}}Disabled{{end}}{{if .ForcePasswordChange}}<small class="block warn">Password change required</small>{{end}}</td><td><a href="/admin/?user={{.ID}}">Edit</a></td></tr>{{else}}<tr><td colspan="5">No users.</td></tr>{{end}}
+          {{range .Admin.Users}}<tr><td><strong>{{.Username}}</strong><small class="block muted">{{.DisplayName}}</small></td><td>{{.Email}}{{if .EmailVerified}}<small class="block good">Administrator verified</small>{{end}}</td><td>{{join .Roles ", "}}</td><td>{{if .Enabled}}Enabled{{else}}Disabled{{end}}{{if .MFAEnabled}}<small class="block good">MFA enrolled</small>{{end}}{{if .ForcePasswordChange}}<small class="block warn">Password change required</small>{{end}}</td><td><a href="/admin/?user={{.ID}}">Edit</a></td></tr>{{else}}<tr><td colspan="5">No users.</td></tr>{{end}}
           </tbody></table>
         </div>
       </section>
       <section class="data-section">
         <div class="section-heading"><h2>{{if .SelectedUser}}Edit {{.SelectedUser.Username}}{{else}}Create user{{end}}</h2></div>
         <form method="post" action="{{if .SelectedUser}}/admin/users/save{{else}}/admin/users/create{{end}}" class="form-body">
-          {{template "csrf" .}}{{if .SelectedUser}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}">{{end}}
+          {{template "csrf" .}}{{if .SelectedUser}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}"><input type="hidden" name="expected_updated_at" value="{{version .SelectedUser.UpdatedAt}}">{{end}}
           <div class="form-grid">
             <label>Username<input name="username" value="{{if .SelectedUser}}{{.SelectedUser.Username}}{{end}}" maxlength="128" required autocomplete="off"></label>
             <label>Display name<input name="display_name" value="{{if .SelectedUser}}{{.SelectedUser.DisplayName}}{{end}}" maxlength="256"></label>
@@ -68,18 +69,20 @@
       </section>
       {{if .SelectedUser}}
       <section class="data-section">
-        <div class="section-heading"><h2>Reset password</h2></div>
+        <div class="section-heading"><h2>Credentials and lifecycle</h2><span class="muted small">Sensitive actions revoke live credentials</span></div>
         <form method="post" action="/admin/users/password" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}"><label>New password<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label><label class="check"><input type="checkbox" name="force_password_change" checked><span>Require change at next login</span></label><p class="muted small">Immediately revokes all of this user's provider sessions and refresh-token families.</p><div><button class="button button-danger">Reset password</button></div></form>
+        {{if .SelectedUser.MFAEnabled}}<form method="post" action="/admin/users/mfa-reset" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}"><p class="muted small">Removes the authenticator, recovery codes, pending enrollment, sessions, and refresh grants.</p><div><button class="button button-danger">Reset MFA</button></div></form>{{end}}
+        <form method="post" action="/admin/users/delete" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}"><label>Type <code>delete</code> to remove this local identity<input name="confirm" autocomplete="off" required></label><p class="muted small">Deletion is soft at the identity row for audit/sub continuity, but local credentials, MFA material, role grants, provider sessions, authorization codes, and refresh capability are removed. The final enabled administrator cannot be deleted.</p><div><button class="button button-danger">Delete user</button></div></form>
       </section>
       {{end}}
 
       {{else if eq .View "roles"}}
       <section class="data-section"><div class="section-heading"><h2>Permission bundles</h2><span class="muted small">No inheritance or deny rules</span></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Role</th><th>Description</th><th>Permissions</th><th>Action</th></tr></thead><tbody>{{range .Admin.Roles}}<tr><td>{{.Name}}{{if .BuiltIn}}<small class="block muted">Built in</small>{{end}}</td><td>{{.Description}}</td><td>{{join .Permissions ", "}}</td><td><a href="/admin/?role={{.ID}}">Edit</a></td></tr>{{end}}</tbody></table></div></section>
-      <section class="data-section"><div class="section-heading"><h2>{{if .SelectedRole}}Edit role{{else}}Create role{{end}}</h2></div><form method="post" action="/admin/roles/save" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{if .SelectedRole}}{{.SelectedRole.ID}}{{end}}"><label>Name<input name="name" value="{{if .SelectedRole}}{{.SelectedRole.Name}}{{end}}" maxlength="128" required {{if .SelectedRole}}{{if .SelectedRole.BuiltIn}}readonly{{end}}{{end}}></label><label>Description<input name="description" value="{{if .SelectedRole}}{{.SelectedRole.Description}}{{end}}" maxlength="1024"></label><fieldset><legend>Permissions</legend><div class="choices">{{range .Admin.Permissions}}<label class="check"><input type="checkbox" name="permissions" value="{{.ID}}" {{if $.SelectedRole}}{{if selected $.SelectedRole.PermissionIDs .ID}}checked{{end}}{{end}}><span>{{.Name}}</span></label>{{end}}</div></fieldset><div><button class="button button-primary">Save role</button> <a href="/admin/?view=roles">Clear selection</a></div></form></section>
+      <section class="data-section"><div class="section-heading"><h2>{{if .SelectedRole}}Edit role{{else}}Create role{{end}}</h2></div><form method="post" action="/admin/roles/save" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{if .SelectedRole}}{{.SelectedRole.ID}}{{end}}">{{if .SelectedRole}}<input type="hidden" name="expected_updated_at" value="{{version .SelectedRole.UpdatedAt}}">{{end}}<label>Name<input name="name" value="{{if .SelectedRole}}{{.SelectedRole.Name}}{{end}}" maxlength="128" required {{if .SelectedRole}}{{if .SelectedRole.BuiltIn}}readonly{{end}}{{end}}></label><label>Description<input name="description" value="{{if .SelectedRole}}{{.SelectedRole.Description}}{{end}}" maxlength="1024"></label><fieldset><legend>Permissions</legend><div class="choices">{{range .Admin.Permissions}}<label class="check"><input type="checkbox" name="permissions" value="{{.ID}}" {{if $.SelectedRole}}{{if selected $.SelectedRole.PermissionIDs .ID}}checked{{end}}{{end}}><span>{{.Name}}</span></label>{{end}}</div></fieldset><div><button class="button button-primary">Save role</button> <a href="/admin/?view=roles">Clear selection</a></div></form>{{if .SelectedRole}}{{if not .SelectedRole.BuiltIn}}<form method="post" action="/admin/roles/delete" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedRole.ID}}"><label>Type <code>delete</code> to remove this role<input name="confirm" required autocomplete="off"></label><p class="muted small">User assignments are removed with the role. The transaction refuses any deletion that would eliminate the final enabled administrator.</p><div><button class="button button-danger">Delete role</button></div></form>{{end}}{{end}}</section>
 
       {{else if eq .View "permissions"}}
-      <section class="data-section"><div class="section-heading"><h2>Permission catalog</h2></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{{range .Admin.Permissions}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td></tr>{{end}}</tbody></table></div></section>
-      <section class="data-section"><div class="section-heading"><h2>Create permission</h2></div><form method="post" action="/admin/permissions/create" class="form-body">{{template "csrf" .}}<label>Name<input name="name" placeholder="bdcmaps.network.read" required maxlength="128"></label><label>Description<input name="description" maxlength="1024"></label><div><button class="button button-primary">Create permission</button></div></form></section>
+      <section class="data-section"><div class="section-heading"><h2>Permission catalog</h2></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Name</th><th>Description</th><th>Action</th></tr></thead><tbody>{{range .Admin.Permissions}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td><td><a href="/admin/?permission={{.ID}}">Edit</a></td></tr>{{end}}</tbody></table></div></section>
+      <section class="data-section"><div class="section-heading"><h2>{{if .SelectedPermission}}Edit permission{{else}}Create permission{{end}}</h2></div><form method="post" action="{{if .SelectedPermission}}/admin/permissions/save{{else}}/admin/permissions/create{{end}}" class="form-body">{{template "csrf" .}}{{if .SelectedPermission}}<input type="hidden" name="id" value="{{.SelectedPermission.ID}}"><input type="hidden" name="expected_updated_at" value="{{version .SelectedPermission.UpdatedAt}}">{{end}}<label>Name<input name="name" value="{{if .SelectedPermission}}{{.SelectedPermission.Name}}{{end}}" placeholder="bdcmaps.network.read" required maxlength="128" {{if .SelectedPermission}}{{if eq .SelectedPermission.Name "system.admin"}}readonly{{end}}{{end}}></label><label>Description<input name="description" value="{{if .SelectedPermission}}{{.SelectedPermission.Description}}{{end}}" maxlength="1024"></label><div><button class="button button-primary">{{if .SelectedPermission}}Save permission{{else}}Create permission{{end}}</button> <a href="/admin/?view=permissions">Clear selection</a></div></form>{{if .SelectedPermission}}{{if ne .SelectedPermission.Name "system.admin"}}<form method="post" action="/admin/permissions/delete" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedPermission.ID}}"><label>Type <code>delete</code> to remove this permission<input name="confirm" required autocomplete="off"></label><p class="muted small">Deletion is refused while any role or OIDC client still references the permission.</p><div><button class="button button-danger">Delete permission</button></div></form>{{end}}{{end}}</section>
 
       {{else if eq .View "clients"}}
       <section class="data-section">
@@ -91,7 +94,7 @@
       <section class="data-section">
         <div class="section-heading"><h2>{{if .SelectedClient}}Edit {{.SelectedClient.Name}}{{else}}Register client{{end}}</h2></div>
         <form method="post" action="{{if .SelectedClient}}/admin/clients/save{{else}}/admin/clients/create{{end}}" class="form-body">
-          {{template "csrf" .}}{{if .SelectedClient}}<input type="hidden" name="id" value="{{.SelectedClient.ID}}">{{end}}
+          {{template "csrf" .}}{{if .SelectedClient}}<input type="hidden" name="id" value="{{.SelectedClient.ID}}"><input type="hidden" name="expected_updated_at" value="{{version .SelectedClient.UpdatedAt}}">{{end}}
           <div class="form-grid">
             <label>Client ID<input name="client_id" value="{{if .SelectedClient}}{{.SelectedClient.ClientID}}{{end}}" maxlength="128" required {{if .SelectedClient}}readonly{{end}}></label>
             <label>Name<input name="name" value="{{if .SelectedClient}}{{.SelectedClient.Name}}{{end}}" maxlength="200" required></label>
@@ -110,17 +113,21 @@
         </form>
         {{if .SelectedClient}}{{if eq .SelectedClient.Type "confidential"}}
         <form method="post" action="/admin/clients/secret" class="form-body"><input type="hidden" name="id" value="{{.SelectedClient.ID}}">{{template "csrf" .}}<p class="muted small">Rotation invalidates the previous client secret immediately.</p><div><button class="button button-danger">Rotate client secret</button></div></form>
-        {{end}}{{end}}
+        {{end}}{{if .SelectedClient}}<form method="post" action="/admin/clients/delete" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedClient.ID}}"><label>Type <code>delete</code> to remove this client<input name="confirm" required autocomplete="off"></label><p class="muted small">Deletion removes registered redirects, scopes, outstanding authorization requests/codes, and refresh families atomically. Already-issued short-lived JWTs expire normally.</p><div><button class="button button-danger">Delete client</button></div></form>{{end}}{{end}}
       </section>
 
       {{else if eq .View "sessions"}}
       <section class="data-section"><div class="section-heading"><h2>Active provider sessions</h2></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>User</th><th>Authenticated</th><th>Methods</th><th>Source</th><th>Action</th></tr></thead><tbody>{{range .Admin.Sessions}}<tr><td>{{.User.Username}}</td><td>{{when .AuthTime}}</td><td>{{join .AuthMethods ", "}}</td><td>{{.IP}}<small class="block muted">{{.UserAgent}}</small></td><td><form method="post" action="/admin/sessions/revoke">{{template "csrf" $}}<input type="hidden" name="session_id" value="{{.ID}}"><button class="button">Revoke</button></form></td></tr>{{end}}</tbody></table></div></section>
 
+      {{else if eq .View "keys"}}
+      <section class="data-section"><div class="section-heading"><h2>OIDC signing keys</h2><span class="muted small">Public verification overlap is retained</span></div><div class="table-wrap" role="region" aria-label="Signing keys" tabindex="0"><table><thead><tr><th>Key ID</th><th>Algorithm</th><th>Created</th><th>Status</th><th>Retired</th></tr></thead><tbody>{{range .SigningKeys}}<tr><td><code>{{.KID}}</code></td><td>{{.Algorithm}}</td><td>{{when .CreatedAt}}</td><td>{{if .Active}}<span class="status good">Active</span>{{else}}Retired{{end}}</td><td>{{if .RetiredAt}}{{when .RetiredAt}}{{end}}</td></tr>{{else}}<tr><td colspan="5">No signing keys.</td></tr>{{end}}</tbody></table></div></section>
+      <section class="data-section"><div class="section-heading"><h2>Rotate signing key</h2></div><form method="post" action="/admin/keys/rotate" class="form-body">{{template "csrf" .}}<p class="muted small">Creates a fresh RSA signing key, retires the active private key immediately, and keeps the old public JWK available so already-issued tokens remain verifiable until their lifetime ends.</p><div><button class="button button-danger">Rotate signing key</button></div></form></section>
+
       {{else}}
       <section class="data-section"><div class="section-heading"><h2>Recent audit events</h2><span class="muted small">Latest 200</span></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Target</th><th>Source</th></tr></thead><tbody>{{range .Admin.Events}}<tr><td>{{when .At}}</td><td><code>{{.Event}}</code></td><td>{{.Actor}}</td><td><code>{{.Target}}</code></td><td>{{.IP}}</td></tr>{{else}}<tr><td colspan="5">No events.</td></tr>{{end}}</tbody></table></div></section>
       {{end}}
 
-      <p class="muted small">OIDC authorization, token issuance, refresh rotation, revocation, logout, and client registration are live. Destructive catalog operations and pagination remain intentionally incomplete.</p>
+      <p class="muted small">OIDC authorization and token issuance are live. User/role/permission lifecycle, MFA reset, recovery-code regeneration, and signing-key rotation are also wired; pagination remains future hardening; edit forms carry row versions and stale concurrent saves fail with conflict.</p>
     </main>
   </div>
 </div>

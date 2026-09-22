@@ -38,8 +38,11 @@ type Store interface {
 	ActiveSigningKey(context.Context) (SigningKey, error)
 	SigningKey(context.Context, string) (SigningKey, error)
 	InstallSigningKey(context.Context, SigningKey, bool) (SigningKey, error)
+	AdminSigningKeys(context.Context, []byte) ([]SigningKey, error)
+	RotateSigningKey(context.Context, []byte, SigningKey, identity.Audit) (SigningKey, error)
 	AdminClients(context.Context, []byte) ([]Client, error)
 	CreateClient(context.Context, []byte, ClientEdit, []byte, identity.Audit) (Client, error)
 	UpdateClient(context.Context, []byte, ClientEdit, identity.Audit) error
 	RotateClientSecret(context.Context, []byte, string, []byte, identity.Audit) error
+	DeleteClient(context.Context, []byte, string, identity.Audit) error
 }

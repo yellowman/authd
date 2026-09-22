@@ -229,6 +229,9 @@ func (s *Service) EditUser(ctx context.Context, actor string, edit UserEdit, a A
 	if !ValidID(edit.ID) {
 		return Invalid("invalid user ID")
 	}
+	if edit.ExpectedUpdatedAt.IsZero() {
+		return Invalid("missing user version")
+	}
 	if err = ValidateIDs(edit.RoleIDs); err != nil {
 		return err
 	}
@@ -237,6 +240,9 @@ func (s *Service) EditUser(ctx context.Context, actor string, edit UserEdit, a A
 func (s *Service) SaveRole(ctx context.Context, actor string, edit RoleEdit, a Audit) error {
 	if edit.ID != "" && !ValidID(edit.ID) {
 		return Invalid("invalid role ID")
+	}
+	if edit.ID != "" && edit.ExpectedUpdatedAt.IsZero() {
+		return Invalid("missing role version")
 	}
 	if err := ValidateName(edit.Name, edit.Description); err != nil {
 		return err
@@ -284,6 +290,17 @@ func (s *Service) ChangePassword(ctx context.Context, raw, current, next string,
 	}
 	return s.Store.ChangePassword(ctx, Hash(raw), rec.PasswordHash, hash, a)
 }
+func (s *Service) EditOwnProfile(ctx context.Context, raw, displayName, email string, a Audit) error {
+	sess, err := s.Session(ctx, raw)
+	if err != nil {
+		return err
+	}
+	p, err := NormalizeProfile(Profile{Username: sess.User.Username, DisplayName: displayName, Email: email})
+	if err != nil {
+		return err
+	}
+	return s.Store.EditOwnProfile(ctx, Hash(raw), p, a)
+}
 func (s *Service) ResetPassword(ctx context.Context, actor, userID, password string, force bool, a Audit) error {
 	if !ValidID(userID) {
 		return Invalid("invalid user ID")
@@ -293,6 +310,46 @@ func (s *Service) ResetPassword(ctx context.Context, actor, userID, password str
 		return err
 	}
 	return s.Store.ResetPassword(ctx, Hash(actor), userID, hash, force, a)
+}
+func (s *Service) DeleteUser(ctx context.Context, actor, userID string, a Audit) error {
+	if !ValidID(userID) {
+		return Invalid("invalid user ID")
+	}
+	return s.Store.DeleteUser(ctx, Hash(actor), userID, a)
+}
+func (s *Service) ResetMFA(ctx context.Context, actor, userID string, a Audit) error {
+	if !ValidID(userID) {
+		return Invalid("invalid user ID")
+	}
+	return s.Store.ResetMFA(ctx, Hash(actor), userID, a)
+}
+func (s *Service) DeleteRole(ctx context.Context, actor, roleID string, a Audit) error {
+	if !ValidID(roleID) {
+		return Invalid("invalid role ID")
+	}
+	return s.Store.DeleteRole(ctx, Hash(actor), roleID, a)
+}
+func (s *Service) SavePermission(ctx context.Context, actor string, edit PermissionEdit, a Audit) error {
+	if !ValidID(edit.ID) {
+		return Invalid("invalid permission ID")
+	}
+	if edit.ExpectedUpdatedAt.IsZero() {
+		return Invalid("missing permission version")
+	}
+	if err := ValidateName(edit.Name, edit.Description); err != nil {
+		return err
+	}
+	switch edit.Name {
+	case "openid", "profile", "email", "groups", "roles", "offline_access":
+		return Invalid("permission name is reserved for an identity scope")
+	}
+	return s.Store.SavePermission(ctx, Hash(actor), edit, a)
+}
+func (s *Service) DeletePermission(ctx context.Context, actor, permissionID string, a Audit) error {
+	if !ValidID(permissionID) {
+		return Invalid("invalid permission ID")
+	}
+	return s.Store.DeletePermission(ctx, Hash(actor), permissionID, a)
 }
 func (s *Service) checkPassword(ctx context.Context, raw, password string) (Session, LoginRecord, error) {
 	sess, err := s.Session(ctx, raw)
@@ -376,6 +433,29 @@ func (s *Service) ConfirmTOTP(ctx context.Context, raw, code string, a Audit) ([
 	}
 	return codes, nil
 }
+func (s *Service) RegenerateRecoveryCodes(ctx context.Context, raw string, a Audit) ([]string, error) {
+	sess, err := s.Session(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	if sess.User.ForcePasswordChange || time.Since(sess.AuthTime) > 10*time.Minute || (!contains(sess.AuthMethods, "otp") && !contains(sess.AuthMethods, "recovery")) {
+		return nil, ErrForbidden
+	}
+	codes := make([]string, 8)
+	hashes := make([][]byte, len(codes))
+	for i := range codes {
+		codes[i], err = cryptoutil.RandomToken(32)
+		if err != nil {
+			return nil, err
+		}
+		hashes[i] = Hash(codes[i])
+	}
+	if err = s.Store.ReplaceRecoveryCodes(ctx, Hash(raw), hashes, a); err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
 func (s *Service) RemoveTOTP(ctx context.Context, raw, password string, a Audit) error {
 	sess, rec, err := s.checkPassword(ctx, raw, password)
 	if err != nil {

@@ -145,6 +145,16 @@ func findPermission(t *testing.T, data identity.AdminData, name string) identity
 	t.Fatal("missing permission", name)
 	return identity.Permission{}
 }
+func findUser(t *testing.T, data identity.AdminData, username string) identity.User {
+	t.Helper()
+	for _, u := range data.Users {
+		if u.Username == username {
+			return u
+		}
+	}
+	t.Fatal("missing user", username)
+	return identity.User{}
+}
 func TestPostgresIdentityLifecycle(t *testing.T) {
 	s, ctx := postgres(t)
 	admin, actor := bootstrap(t, ctx, s)
@@ -174,13 +184,24 @@ func TestPostgresIdentityLifecycle(t *testing.T) {
 		t.Fatalf("unprivileged write: %v", e)
 	}
 
-	edit := identity.UserEdit{ID: alice.User.ID, Profile: identity.Profile{Username: "alice", Email: "alice@example.test"}, Enabled: true, VerifyEmail: true, RoleIDs: []string{viewer.ID}}
+	data, e = s.AdminData(ctx, actor.TokenHash)
+	require(t, e)
+	aliceAdmin := findUser(t, data, "alice")
+	edit := identity.UserEdit{ID: alice.User.ID, Profile: identity.Profile{Username: "alice", Email: "alice@example.test"}, Enabled: true, VerifyEmail: true, RoleIDs: []string{viewer.ID}, ExpectedUpdatedAt: aliceAdmin.UpdatedAt}
 	require(t, s.EditUser(ctx, actor.TokenHash, edit, auditFixture))
 	updated, e := s.Session(ctx, initial.TokenHash, time.Hour)
 	require(t, e)
 	if !updated.Has(perm.Name) || !updated.User.EmailVerified {
 		t.Fatal("live session did not read updated grants/profile")
 	}
+	// A stale form version must fail after the first successful mutation.
+	if err := s.EditUser(ctx, actor.TokenHash, edit, auditFixture); !errors.Is(err, identity.ErrConflict) {
+		t.Fatalf("stale user edit accepted: %v", err)
+	}
+	data, e = s.AdminData(ctx, actor.TokenHash)
+	require(t, e)
+	aliceAdmin = findUser(t, data, "alice")
+	edit.ExpectedUpdatedAt = aliceAdmin.UpdatedAt
 	edit.Email = "other@example.test"
 	require(t, s.EditUser(ctx, actor.TokenHash, edit, auditFixture))
 	updated, e = s.Session(ctx, initial.TokenHash, time.Hour)
@@ -188,6 +209,10 @@ func TestPostgresIdentityLifecycle(t *testing.T) {
 	if updated.User.EmailVerified {
 		t.Fatal("changing email preserved verification")
 	}
+	data, e = s.AdminData(ctx, actor.TokenHash)
+	require(t, e)
+	aliceAdmin = findUser(t, data, "alice")
+	edit.ExpectedUpdatedAt = aliceAdmin.UpdatedAt
 	require(t, s.EditUser(ctx, actor.TokenHash, edit, auditFixture))
 	updated, e = s.Session(ctx, initial.TokenHash, time.Hour)
 	require(t, e)
@@ -202,16 +227,16 @@ func TestPostgresIdentityLifecycle(t *testing.T) {
 		t.Fatal("SQL update bypassed verification trigger")
 	}
 
-	require(t, s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: viewer.ID, Name: viewer.Name}, auditFixture))
+	require(t, s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: viewer.ID, Name: viewer.Name, ExpectedUpdatedAt: viewer.UpdatedAt}, auditFixture))
 	updated, e = s.Session(ctx, initial.TokenHash, time.Hour)
 	require(t, e)
 	if updated.Has(perm.Name) {
 		t.Fatal("removed permission survived a provider session read")
 	}
-	if e = s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: builtin.ID, Name: builtin.Name}, auditFixture); !errors.Is(e, identity.ErrForbidden) {
+	if e = s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: builtin.ID, Name: builtin.Name, ExpectedUpdatedAt: builtin.UpdatedAt}, auditFixture); !errors.Is(e, identity.ErrForbidden) {
 		t.Fatalf("built-in role stripped: %v", e)
 	}
-	adminEdit := identity.UserEdit{ID: admin.User.ID, Profile: identity.Profile{Username: "admin", Email: "admin@example.test"}, Enabled: false, RoleIDs: []string{builtin.ID}}
+	adminEdit := identity.UserEdit{ID: admin.User.ID, Profile: identity.Profile{Username: "admin", Email: "admin@example.test"}, Enabled: false, RoleIDs: []string{builtin.ID}, ExpectedUpdatedAt: admin.User.UpdatedAt}
 	if e = s.EditUser(ctx, actor.TokenHash, adminEdit, auditFixture); !errors.Is(e, identity.ErrLastAdmin) {
 		t.Fatalf("last administrator disabled: %v", e)
 	}
@@ -376,5 +401,128 @@ func TestPostgresBootstrapRaceAndStickyState(t *testing.T) {
 	require(t, e)
 	if open {
 		t.Fatal("bootstrap reopened after users were deleted")
+	}
+}
+
+func TestPostgresDestructiveLifecycleAndRecoveryRegeneration(t *testing.T) {
+	s, ctx := postgres(t)
+	admin, actor := bootstrap(t, ctx, s)
+
+	// The final enabled administrator is protected from destructive deletion.
+	if err := s.DeleteUser(ctx, actor.TokenHash, admin.User.ID, auditFixture); !errors.Is(err, identity.ErrLastAdmin) {
+		t.Fatalf("last administrator deleted: %v", err)
+	}
+
+	require(t, s.CreatePermission(ctx, actor.TokenHash, "temporary.read", "temporary", auditFixture))
+	data, err := s.AdminData(ctx, actor.TokenHash)
+	require(t, err)
+	perm := findPermission(t, data, "temporary.read")
+	permEdit := identity.PermissionEdit{ID: perm.ID, Name: "temporary.view", Description: "renamed", ExpectedUpdatedAt: perm.UpdatedAt}
+	require(t, s.SavePermission(ctx, actor.TokenHash, permEdit, auditFixture))
+	if err = s.SavePermission(ctx, actor.TokenHash, permEdit, auditFixture); !errors.Is(err, identity.ErrConflict) {
+		t.Fatalf("stale permission edit accepted: %v", err)
+	}
+	require(t, s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{Name: "temporary-role", PermissionIDs: []string{perm.ID}}, auditFixture))
+	if err = s.DeletePermission(ctx, actor.TokenHash, perm.ID, auditFixture); !errors.Is(err, identity.ErrConflict) {
+		t.Fatalf("referenced permission deleted: %v", err)
+	}
+	data, err = s.AdminData(ctx, actor.TokenHash)
+	require(t, err)
+	role := findRole(t, data, "temporary-role")
+	roleEdit := identity.RoleEdit{ID: role.ID, Name: role.Name, Description: "updated", PermissionIDs: role.PermissionIDs, ExpectedUpdatedAt: role.UpdatedAt}
+	require(t, s.SaveRole(ctx, actor.TokenHash, roleEdit, auditFixture))
+	if err = s.SaveRole(ctx, actor.TokenHash, roleEdit, auditFixture); !errors.Is(err, identity.ErrConflict) {
+		t.Fatalf("stale role edit accepted: %v", err)
+	}
+	require(t, s.DeleteRole(ctx, actor.TokenHash, role.ID, auditFixture))
+	require(t, s.DeletePermission(ctx, actor.TokenHash, perm.ID, auditFixture))
+
+	require(t, s.CreateUser(ctx, actor.TokenHash, identity.NewUser{Profile: identity.Profile{Username: "delete-me", Email: "delete@example.test"}, PasswordHash: "repository-test-delete-hash"}, auditFixture))
+	victim, err := s.LoginRecord(ctx, "delete-me")
+	require(t, err)
+	victimSession := sessionFixture(t, victim, "pwd")
+	require(t, s.CreateSession(ctx, victim, victimSession, nil, "", auditFixture))
+	require(t, s.DeleteUser(ctx, actor.TokenHash, victim.User.ID, auditFixture))
+	if _, err = s.LoginRecord(ctx, "delete-me"); !errors.Is(err, identity.ErrCredentials) {
+		t.Fatalf("deleted user still authenticates: %v", err)
+	}
+	if _, err = s.Session(ctx, victimSession.TokenHash, time.Hour); !errors.Is(err, identity.ErrSession) {
+		t.Fatalf("deleted user session survived: %v", err)
+	}
+	var passwordRows, roleRows int
+	require(t, s.DB.QueryRowContext(ctx, `SELECT
+		(SELECT count(*) FROM password_credentials WHERE user_id=$1::uuid),
+		(SELECT count(*) FROM user_roles WHERE user_id=$1::uuid)`, victim.User.ID).Scan(&passwordRows, &roleRows))
+	if passwordRows != 0 || roleRows != 0 {
+		t.Fatalf("deleted identity retained credential/grants password=%d roles=%d", passwordRows, roleRows)
+	}
+
+	// Recovery regeneration is allowed only from a fresh MFA-authenticated session.
+	require(t, s.CreateUser(ctx, actor.TokenHash, identity.NewUser{Profile: identity.Profile{Username: "mfa-user"}, PasswordHash: "repository-test-mfa-hash"}, auditFixture))
+	mfaUser, err := s.LoginRecord(ctx, "mfa-user")
+	require(t, err)
+	cipher := []byte("integration-encrypted-seed")
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO totp_credentials(user_id,secret_ciphertext,last_counter,confirmed_at) VALUES($1::uuid,$2,1,now())`, mfaUser.User.ID, cipher)
+	require(t, err)
+	mfaUser, err = s.LoginRecord(ctx, "mfa-user")
+	require(t, err)
+	counter := int64(2)
+	mfaSession := sessionFixture(t, mfaUser, "pwd", "otp")
+	require(t, s.CreateSession(ctx, mfaUser, mfaSession, &identity.FactorUse{Ciphertext: cipher, Counter: &counter}, "", auditFixture))
+	newCodes := [][]byte{identity.Hash("one"), identity.Hash("two"), identity.Hash("three")}
+	require(t, s.ReplaceRecoveryCodes(ctx, mfaSession.TokenHash, newCodes, auditFixture))
+	var recoveryCount int
+	require(t, s.DB.QueryRowContext(ctx, `SELECT count(*) FROM recovery_codes WHERE user_id=$1::uuid AND consumed_at IS NULL`, mfaUser.User.ID).Scan(&recoveryCount))
+	if recoveryCount != len(newCodes) {
+		t.Fatalf("recovery rows=%d want=%d", recoveryCount, len(newCodes))
+	}
+	require(t, s.ResetMFA(ctx, actor.TokenHash, mfaUser.User.ID, auditFixture))
+	mfaUser, err = s.LoginRecord(ctx, "mfa-user")
+	require(t, err)
+	if mfaUser.Factor != nil {
+		t.Fatal("administrator MFA reset retained authenticator")
+	}
+	if _, err = s.Session(ctx, mfaSession.TokenHash, time.Hour); !errors.Is(err, identity.ErrSession) {
+		t.Fatalf("MFA reset retained provider session: %v", err)
+	}
+}
+
+func TestPostgresCleanupExpiredState(t *testing.T) {
+	s, ctx := postgres(t)
+	_, actor := bootstrap(t, ctx, s)
+	now := time.Now().UTC()
+
+	// Seed only states whose expiry semantics are independent of OIDC client setup.
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO bootstrap_tokens(token_hash,expires_at,consumed_at,created_at) VALUES($1,$2,$3,$4)`, identity.Hash("expired-bootstrap"), now.Add(-48*time.Hour), now.Add(-47*time.Hour), now.Add(-48*time.Hour))
+	require(t, err)
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO pending_totp_enrollments(user_id,session_id,secret_ciphertext,expires_at) VALUES($1::uuid,$2::uuid,$3,$4)`, actor.User.ID, actor.ID, []byte("expired"), now.Add(-time.Hour))
+	require(t, err)
+	_, err = s.DB.ExecContext(ctx, `UPDATE sessions SET idle_expires_at=$2 WHERE id=$1::uuid`, actor.ID, now.Add(-time.Minute))
+	require(t, err)
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO audit_events(event_type,occurred_at) VALUES('old.event',$1)`, now.Add(-400*24*time.Hour))
+	require(t, err)
+
+	stats, err := db.CleanupExpired(ctx, s.DB, now, 365*24*time.Hour)
+	require(t, err)
+	if stats.BootstrapTokens != 1 || stats.PendingTOTP != 1 || stats.Sessions != 1 || stats.AuditEvents != 1 {
+		t.Fatalf("unexpected cleanup stats %#v", stats)
+	}
+}
+
+func TestPostgresSelfProfileEditRequiresFreshSession(t *testing.T) {
+	s, ctx := postgres(t)
+	_, actor := bootstrap(t, ctx, s)
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET email_verified=true WHERE id=$1::uuid`, actor.User.ID)
+	require(t, err)
+	require(t, s.EditOwnProfile(ctx, actor.TokenHash, identity.Profile{Username: actor.User.Username, DisplayName: "Primary Administrator", Email: "new-admin@example.test"}, auditFixture))
+	updated, err := s.Session(ctx, actor.TokenHash, time.Hour)
+	require(t, err)
+	if updated.User.DisplayName != "Primary Administrator" || updated.User.Email != "new-admin@example.test" || updated.User.EmailVerified {
+		t.Fatalf("unexpected self profile state: %+v", updated.User)
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE sessions SET auth_time=now()-interval '11 minutes' WHERE id=$1::uuid`, actor.ID)
+	require(t, err)
+	if err = s.EditOwnProfile(ctx, actor.TokenHash, identity.Profile{Username: actor.User.Username, DisplayName: "Stale", Email: "stale@example.test"}, auditFixture); !errors.Is(err, identity.ErrForbidden) {
+		t.Fatalf("stale session edited profile: %v", err)
 	}
 }

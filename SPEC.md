@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.5
+## Specification v0.6
 
-Status: binding product design. v0.5 implements the local identity/admin slice and the central OIDC provider path. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design. v0.6 implements the local identity/admin slice, the central OIDC provider path, and the first lifecycle/operations controls. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -1592,7 +1592,7 @@ Production issuer URLs use HTTPS.
 
 The issuer is configured explicitly and is never inferred blindly from arbitrary `Host` or `X-Forwarded-*` headers.
 
-Forwarded headers are trusted only from explicitly configured reverse proxies if that support is added.
+Forwarded headers are trusted only from explicitly configured reverse-proxy CIDR prefixes. If the direct peer is not trusted, `X-Forwarded-For` is ignored. For a trusted chain, authd walks addresses from the direct peer toward the client and uses the nearest untrusted address. Malformed or oversized chains fail closed to the direct peer address.
 
 Recommended security headers:
 
@@ -1645,9 +1645,12 @@ mfa.success
 mfa.failure
 mfa.enrolled
 mfa.removed
+mfa.reset
+recovery_codes.regenerated
 
 user.created
 user.updated
+user.profile_updated
 user.enabled
 user.disabled
 user.deleted
@@ -1671,6 +1674,7 @@ client.deleted
 client.secret_rotated
 
 session.revoked
+session.others_revoked
 
 token.refresh
 token.refresh_reuse_detected
@@ -1718,6 +1722,15 @@ new authorization denied
 
 Existing access tokens expire naturally within their short TTL.
 
+## User Deleted
+
+Deletion is a soft delete of the immutable identity row so audit references and the
+OIDC subject identifier remain historically meaningful. Local password credentials,
+MFA enrollment/recovery material, role assignments, provider sessions, outstanding
+authorization codes, and refresh capability MUST be removed in the same transaction.
+The final enabled administrator cannot be deleted. Previously issued short-lived
+access/ID tokens expire naturally.
+
 ## Role Added/Removed
 
 Immediately affects:
@@ -1750,6 +1763,13 @@ refresh denied
 ```
 
 Existing access tokens expire naturally.
+
+## Client Deleted
+
+Deletion removes the client registration and all durable state owned by it, including
+redirect/logout registrations, allowed scopes, outstanding authorization requests and
+codes, and refresh-token families. Already-issued short-lived JWTs are not maintained
+in an online revocation list and expire naturally.
 
 ---
 
@@ -1793,6 +1813,9 @@ AUTHD_LISTEN
 DATABASE_URL
 AUTHD_MASTER_KEY_FILE or AUTHD_MASTER_KEY
 AUTHD_DEVELOPMENT
+AUTHD_CLEANUP_INTERVAL
+AUTHD_AUDIT_RETENTION
+AUTHD_TRUSTED_PROXIES
 ```
 
 Users, roles, permissions, and clients do not live in configuration files.
@@ -2122,7 +2145,7 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.5 implementation limits and evidence
+# 45. v0.6 implementation limits and evidence
 
 This revision implements the identity/bootstrap/session/MFA/admin source slice and
 the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
@@ -2154,9 +2177,23 @@ The application requires live PostgreSQL for authentication and current grants;
 it does not fall back to cached allows after a database failure.
 
 The initial admin editor has an explicit 200-record catalog ceiling and fails
-closed instead of rendering an incomplete assignment list. Deletion, pagination,
-client CRUD, MFA reset/regeneration, cleanup, trusted-proxy IP handling, backup
-qualification, and further operation-specific audit detail remain TODO items.
+closed instead of rendering an incomplete assignment list. v0.6 implements user,
+non-built-in-role, unreferenced-permission, and OIDC-client deletion; permission
+editing; administrative MFA reset; recent-MFA recovery-code regeneration; signing-key
+inventory/rotation; periodic expiry/audit cleanup; and row-version-based optimistic
+concurrency for user, role, permission, and OIDC-client edits. Stale concurrent saves
+fail closed with a conflict rather than silently overwriting a newer administrator
+change. User deletion is soft at the identity row but removes local credentials, MFA
+material, role grants, provider sessions, outstanding authorization codes, and refresh
+capability. OIDC-client deletion atomically removes its durable grant state;
+already-issued short-lived JWTs expire normally. Automatic cleanup intentionally never
+deletes signing keys.
+
+Pagination, an explicit signing-key deletion/retention schedule, safe break-glass
+recovery, backup/master-key rotation qualification, and further operation-specific
+audit detail remain TODO items. Trusted-proxy source-IP
+resolution is implemented through an explicit CIDR allow-list; rate limiting remains
+process-local and therefore single-instance.
 Only implemented local-provider sessions are revoked by local logout. Existing
 relying-party application sessions are outside that operation.
 

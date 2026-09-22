@@ -20,7 +20,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	var c oidc.Client
 	var ttl int64
 	var redirects, logouts, identityScopes, permissionIDs, permissions string
-	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &ttl, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
+	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &ttl, &c.UpdatedAt, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
 	if err != nil {
 		return c, err
 	}
@@ -43,7 +43,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	return c, nil
 }
 
-const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.access_token_ttl_seconds,
+const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.access_token_ttl_seconds,c.updated_at,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_redirect_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_logout_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.scope ORDER BY x.scope) FROM client_identity_scopes x WHERE x.client_id=c.id),'[]'::json)::text,
@@ -448,40 +448,83 @@ func (s *OIDCStore) SigningKey(ctx context.Context, kid string) (oidc.SigningKey
 	k.PublicJWK = []byte(jwkText)
 	return k, err
 }
+func installSigningKeyTx(ctx context.Context, tx *sql.Tx, key oidc.SigningKey, rotate bool, actor string, a identity.Audit) (oidc.SigningKey, error) {
+	existing, existingErr := scanSigningText(tx.QueryRowContext(ctx, `SELECT id::text,kid,algorithm,private_key_ciphertext,public_jwk::text,active,created_at,retired_at FROM signing_keys WHERE active`))
+	if existingErr == nil && !rotate {
+		return existing, nil
+	}
+	if existingErr != nil && !errors.Is(existingErr, sql.ErrNoRows) {
+		return oidc.SigningKey{}, existingErr
+	}
+	hadActive := existingErr == nil
+	if rotate && hadActive {
+		if _, e := tx.ExecContext(ctx, `UPDATE signing_keys SET active=false,retired_at=COALESCE(retired_at,now()),private_key_ciphertext=''::bytea WHERE id=$1::uuid AND active`, existing.ID); e != nil {
+			return oidc.SigningKey{}, e
+		}
+		if e := audit(ctx, tx, "signing_key.retired", actor, "signing_key", existing.ID, a); e != nil {
+			return oidc.SigningKey{}, e
+		}
+	}
+	var jwk any
+	if e := json.Unmarshal(key.PublicJWK, &jwk); e != nil {
+		return oidc.SigningKey{}, e
+	}
+	raw, _ := json.Marshal(jwk)
+	if e := tx.QueryRowContext(ctx, `INSERT INTO signing_keys(kid,algorithm,private_key_ciphertext,public_jwk,active) VALUES($1,'RS256',$2,$3::jsonb,true) RETURNING id::text,created_at`, key.KID, key.Ciphertext, string(raw)).Scan(&key.ID, &key.CreatedAt); e != nil {
+		return oidc.SigningKey{}, e
+	}
+	key.Active = true
+	event := "signing_key.created"
+	if rotate && hadActive {
+		event = "signing_key.rotated"
+	}
+	if e := audit(ctx, tx, event, actor, "signing_key", key.ID, a); e != nil {
+		return oidc.SigningKey{}, e
+	}
+	return key, nil
+}
+
 func (s *OIDCStore) InstallSigningKey(ctx context.Context, key oidc.SigningKey, rotate bool) (out oidc.SigningKey, err error) {
 	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
-		existing, existingErr := scanSigningText(tx.QueryRowContext(ctx, `SELECT id::text,kid,algorithm,private_key_ciphertext,public_jwk::text,active,created_at,retired_at FROM signing_keys WHERE active`))
-		if existingErr == nil && !rotate {
-			out = existing
-			return nil
-		}
-		if existingErr != nil && !errors.Is(existingErr, sql.ErrNoRows) {
-			return existingErr
-		}
-		hadActive := existingErr == nil
-		if rotate && hadActive {
-			if _, e := tx.ExecContext(ctx, `UPDATE signing_keys SET active=false,retired_at=COALESCE(retired_at,now()),private_key_ciphertext=''::bytea WHERE id=$1::uuid AND active`, existing.ID); e != nil {
-				return e
-			}
-			if e := audit(ctx, tx, "signing_key.retired", "", "signing_key", existing.ID, identity.Audit{}); e != nil {
-				return e
-			}
-		}
-		var jwk any
-		if e := json.Unmarshal(key.PublicJWK, &jwk); e != nil {
+		var e error
+		out, e = installSigningKeyTx(ctx, tx, key, rotate, "", identity.Audit{})
+		return e
+	})
+	return
+}
+
+func (s *OIDCStore) AdminSigningKeys(ctx context.Context, actorHash []byte) (out []oidc.SigningKey, err error) {
+	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
+		if _, e := requireSession(ctx, tx, actorHash, true, false, false); e != nil {
 			return e
 		}
-		raw, _ := json.Marshal(jwk)
-		if e := tx.QueryRowContext(ctx, `INSERT INTO signing_keys(kid,algorithm,private_key_ciphertext,public_jwk,active) VALUES($1,'RS256',$2,$3::jsonb,true) RETURNING id::text,created_at`, key.KID, key.Ciphertext, string(raw)).Scan(&key.ID, &key.CreatedAt); e != nil {
+		rows, e := tx.QueryContext(ctx, `SELECT id::text,kid,algorithm,private_key_ciphertext,public_jwk::text,active,created_at,retired_at FROM signing_keys ORDER BY active DESC,created_at DESC LIMIT 64`)
+		if e != nil {
 			return e
 		}
-		key.Active = true
-		out = key
-		event := "signing_key.created"
-		if rotate && hadActive {
-			event = "signing_key.rotated"
+		defer rows.Close()
+		for rows.Next() {
+			key, e := scanSigningText(rows)
+			if e != nil {
+				return e
+			}
+			// Never expose private-key ciphertext to the administration layer.
+			key.Ciphertext = nil
+			out = append(out, key)
 		}
-		return audit(ctx, tx, event, "", "signing_key", key.ID, identity.Audit{})
+		return rows.Err()
+	})
+	return
+}
+
+func (s *OIDCStore) RotateSigningKey(ctx context.Context, actorHash []byte, key oidc.SigningKey, a identity.Audit) (out oidc.SigningKey, err error) {
+	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, actorHash, true, true, false)
+		if e != nil {
+			return e
+		}
+		out, e = installSigningKeyTx(ctx, tx, key, true, actor.User.ID, a)
+		return e
 	})
 	return
 }
@@ -589,6 +632,9 @@ func (s *OIDCStore) UpdateClient(ctx context.Context, actorHash []byte, edit oid
 		if e != nil {
 			return e
 		}
+		if edit.ExpectedUpdatedAt.IsZero() || !before.UpdatedAt.Equal(edit.ExpectedUpdatedAt) {
+			return identity.ErrConflict
+		}
 		if before.ClientID != edit.ClientID || before.Type != edit.Type {
 			return identity.ErrConflict
 		}
@@ -629,5 +675,32 @@ func (s *OIDCStore) RotateClientSecret(ctx context.Context, actorHash []byte, cl
 			return identity.ErrConflict
 		}
 		return audit(ctx, tx, "client.secret_rotated", actor.User.ID, "client", clientID, a)
+	})
+}
+
+func (s *OIDCStore) DeleteClient(ctx context.Context, actorHash []byte, clientID string, a identity.Audit) error {
+	return (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, actorHash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var exists string
+		if e = tx.QueryRowContext(ctx, `SELECT client_id FROM clients WHERE id=$1::uuid FOR UPDATE`, clientID).Scan(&exists); e != nil {
+			if errors.Is(e, sql.ErrNoRows) {
+				return identity.ErrConflict
+			}
+			return e
+		}
+		// The clients row owns every durable authorization continuation, code,
+		// refresh family, redirect/scopes set, and secret through foreign keys.
+		// Deleting it therefore makes all future grants impossible atomically.
+		res, e := tx.ExecContext(ctx, `DELETE FROM clients WHERE id=$1::uuid`, clientID)
+		if e != nil {
+			return e
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return identity.ErrConflict
+		}
+		return audit(ctx, tx, "client.deleted", actor.User.ID, "client", clientID, a)
 	})
 }

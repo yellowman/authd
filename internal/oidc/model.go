@@ -17,6 +17,7 @@ type Client struct {
 	IdentityScopes       []string
 	PermissionIDs        []string
 	Permissions          []string
+	UpdatedAt            time.Time
 }
 
 type AuthorizationRequest struct {
@@ -85,4 +86,5 @@ type ClientEdit struct {
 	LogoutURIs           []string
 	IdentityScopes       []string
 	PermissionIDs        []string
+	ExpectedUpdatedAt    time.Time
 }

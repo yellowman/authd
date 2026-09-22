@@ -222,6 +222,7 @@ func (s *IdentityStore) CreateSession(ctx context.Context, expected identity.Log
 }
 
 const sessionColumns = `s.id::text,s.token_hash,s.csrf_hash,s.auth_time,s.created_at,s.last_seen_at,s.idle_expires_at,s.absolute_expires_at,COALESCE(host(s.ip_address),''),s.user_agent,array_to_json(s.auth_methods)::text,` + userColumns + `,
+ EXISTS(SELECT 1 FROM totp_credentials t WHERE t.user_id=u.id),
  COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.name ORDER BY x.name) FROM (SELECT DISTINCT p.name FROM user_roles ur JOIN role_permissions rp ON rp.role_id=ur.role_id JOIN permissions p ON p.id=rp.permission_id WHERE ur.user_id=u.id) x),'[]'::json)::text`
 
@@ -230,7 +231,7 @@ func scanSession(row scanner) (identity.Session, error) {
 	var methods, roles, permissions string
 	args := []any{&s.ID, &s.TokenHash, &s.CSRFHash, &s.AuthTime, &s.CreatedAt, &s.LastSeenAt, &s.IdleExpiresAt, &s.AbsoluteExpiresAt, &s.IP, &s.UserAgent, &methods}
 	args = append(args, userDest(&s.User)...)
-	args = append(args, &roles, &permissions)
+	args = append(args, &s.User.MFAEnabled, &roles, &permissions)
 	if err := row.Scan(args...); err != nil {
 		return s, err
 	}
@@ -324,6 +325,22 @@ func (s *IdentityStore) RevokeSession(ctx context.Context, hash []byte, target s
 		return audit(ctx, tx, "session.revoked", sess.User.ID, "session", target, a)
 	})
 }
+func (s *IdentityStore) EditOwnProfile(ctx context.Context, hash []byte, p identity.Profile, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		sess, e := requireSession(ctx, tx, hash, false, true, false)
+		if e != nil {
+			return e
+		}
+		res, e := tx.ExecContext(ctx, `UPDATE users SET display_name=$2,email=NULLIF($3,''),updated_at=now() WHERE id=$1::uuid AND deleted_at IS NULL`, sess.User.ID, p.DisplayName, p.Email)
+		if e != nil {
+			return e
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return identity.ErrConflict
+		}
+		return audit(ctx, tx, "user.profile_updated", sess.User.ID, "user", sess.User.ID, a)
+	})
+}
 func revokeUser(ctx context.Context, tx *sql.Tx, id, reason string) error {
 	if _, e := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=$1::uuid`, id); e != nil {
 		return e
@@ -409,8 +426,11 @@ func (s *IdentityStore) EditUser(ctx context.Context, hash []byte, u identity.Us
 			return e
 		}
 		var before identity.User
-		if e = tx.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.id=$1::uuid AND u.deleted_at IS NULL`, u.ID).Scan(userDest(&before)...); e != nil {
+		if e = tx.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.id=$1::uuid AND u.deleted_at IS NULL FOR UPDATE`, u.ID).Scan(userDest(&before)...); e != nil {
 			return e
+		}
+		if u.ExpectedUpdatedAt.IsZero() || !before.UpdatedAt.Equal(u.ExpectedUpdatedAt) {
+			return identity.ErrConflict
 		}
 		verified := u.VerifyEmail && u.Email != "" && u.Email == before.Email
 		if _, e = tx.ExecContext(ctx, `UPDATE users SET username=$2,display_name=$3,email=NULLIF($4,''),email_verified=$5,enabled=$6,force_password_change=$7,updated_at=now() WHERE id=$1::uuid`, u.ID, u.Username, u.DisplayName, u.Email, verified, u.Enabled, u.ForcePasswordChange); e != nil {
@@ -430,6 +450,43 @@ func (s *IdentityStore) EditUser(ctx context.Context, hash []byte, u identity.Us
 		return audit(ctx, tx, "user.updated", actor.User.ID, "user", u.ID, a)
 	})
 }
+func (s *IdentityStore) DeleteUser(ctx context.Context, hash []byte, id string, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, hash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var exists bool
+		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid AND deleted_at IS NULL)`, id).Scan(&exists); e != nil {
+			return e
+		}
+		if !exists {
+			return identity.ErrConflict
+		}
+		if e = revokeUser(ctx, tx, id, "user_deleted"); e != nil {
+			return e
+		}
+		for _, q := range []string{
+			`DELETE FROM pending_totp_enrollments WHERE user_id=$1::uuid`,
+			`DELETE FROM recovery_codes WHERE user_id=$1::uuid`,
+			`DELETE FROM totp_credentials WHERE user_id=$1::uuid`,
+			`DELETE FROM password_credentials WHERE user_id=$1::uuid`,
+			`DELETE FROM user_roles WHERE user_id=$1::uuid`,
+		} {
+			if _, e = tx.ExecContext(ctx, q, id); e != nil {
+				return e
+			}
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE users SET enabled=false,force_password_change=false,email_verified=false,deleted_at=now(),updated_at=now() WHERE id=$1::uuid AND deleted_at IS NULL`, id); e != nil {
+			return e
+		}
+		if e = lastAdmin(ctx, tx); e != nil {
+			return e
+		}
+		return audit(ctx, tx, "user.deleted", actor.User.ID, "user", id, a)
+	})
+}
+
 func (s *IdentityStore) ResetPassword(ctx context.Context, hash []byte, id, password string, force bool, a identity.Audit) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		actor, e := requireSession(ctx, tx, hash, true, true, false)
@@ -449,6 +506,35 @@ func (s *IdentityStore) ResetPassword(ctx context.Context, hash []byte, id, pass
 		return audit(ctx, tx, "user.password_reset", actor.User.ID, "user", id, a)
 	})
 }
+func (s *IdentityStore) ResetMFA(ctx context.Context, hash []byte, id string, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, hash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var exists bool
+		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1::uuid AND deleted_at IS NULL)`, id).Scan(&exists); e != nil {
+			return e
+		}
+		if !exists {
+			return identity.ErrConflict
+		}
+		for _, q := range []string{
+			`DELETE FROM pending_totp_enrollments WHERE user_id=$1::uuid`,
+			`DELETE FROM recovery_codes WHERE user_id=$1::uuid`,
+			`DELETE FROM totp_credentials WHERE user_id=$1::uuid`,
+		} {
+			if _, e = tx.ExecContext(ctx, q, id); e != nil {
+				return e
+			}
+		}
+		if e = revokeUser(ctx, tx, id, "mfa_reset"); e != nil {
+			return e
+		}
+		return audit(ctx, tx, "mfa.reset", actor.User.ID, "user", id, a)
+	})
+}
+
 func (s *IdentityStore) SaveRole(ctx context.Context, hash []byte, edit identity.RoleEdit, a identity.Audit) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		actor, e := requireSession(ctx, tx, hash, true, true, false)
@@ -463,8 +549,12 @@ func (s *IdentityStore) SaveRole(ctx context.Context, hash []byte, edit identity
 			}
 		} else {
 			var oldName string
-			if e = tx.QueryRowContext(ctx, `SELECT built_in,name FROM roles WHERE id=$1::uuid`, id).Scan(&builtIn, &oldName); e != nil {
+			var updatedAt time.Time
+			if e = tx.QueryRowContext(ctx, `SELECT built_in,name,updated_at FROM roles WHERE id=$1::uuid FOR UPDATE`, id).Scan(&builtIn, &oldName, &updatedAt); e != nil {
 				return e
+			}
+			if edit.ExpectedUpdatedAt.IsZero() || !updatedAt.Equal(edit.ExpectedUpdatedAt) {
+				return identity.ErrConflict
 			}
 			if builtIn && oldName != edit.Name {
 				return identity.ErrForbidden
@@ -494,6 +584,29 @@ func (s *IdentityStore) SaveRole(ctx context.Context, hash []byte, edit identity
 		return audit(ctx, tx, "role.saved", actor.User.ID, "role", id, a)
 	})
 }
+func (s *IdentityStore) DeleteRole(ctx context.Context, hash []byte, id string, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, hash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var builtIn bool
+		if e = tx.QueryRowContext(ctx, `SELECT built_in FROM roles WHERE id=$1::uuid`, id).Scan(&builtIn); e != nil {
+			return e
+		}
+		if builtIn {
+			return identity.ErrForbidden
+		}
+		if _, e = tx.ExecContext(ctx, `DELETE FROM roles WHERE id=$1::uuid`, id); e != nil {
+			return e
+		}
+		if e = lastAdmin(ctx, tx); e != nil {
+			return e
+		}
+		return audit(ctx, tx, "role.deleted", actor.User.ID, "role", id, a)
+	})
+}
+
 func (s *IdentityStore) CreatePermission(ctx context.Context, hash []byte, name, description string, a identity.Audit) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		actor, e := requireSession(ctx, tx, hash, true, true, false)
@@ -505,5 +618,58 @@ func (s *IdentityStore) CreatePermission(ctx context.Context, hash []byte, name,
 			return e
 		}
 		return audit(ctx, tx, "permission.created", actor.User.ID, "permission", id, a)
+	})
+}
+
+func (s *IdentityStore) SavePermission(ctx context.Context, hash []byte, edit identity.PermissionEdit, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, hash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var oldName string
+		var updatedAt time.Time
+		if e = tx.QueryRowContext(ctx, `SELECT name,updated_at FROM permissions WHERE id=$1::uuid FOR UPDATE`, edit.ID).Scan(&oldName, &updatedAt); e != nil {
+			return e
+		}
+		if edit.ExpectedUpdatedAt.IsZero() || !updatedAt.Equal(edit.ExpectedUpdatedAt) {
+			return identity.ErrConflict
+		}
+		if oldName == "system.admin" && edit.Name != oldName {
+			return identity.ErrForbidden
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE permissions SET name=$2,description=$3,updated_at=now() WHERE id=$1::uuid`, edit.ID, edit.Name, edit.Description); e != nil {
+			return e
+		}
+		return audit(ctx, tx, "permission.updated", actor.User.ID, "permission", edit.ID, a)
+	})
+}
+
+func (s *IdentityStore) DeletePermission(ctx context.Context, hash []byte, id string, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		actor, e := requireSession(ctx, tx, hash, true, true, false)
+		if e != nil {
+			return e
+		}
+		var name string
+		if e = tx.QueryRowContext(ctx, `SELECT name FROM permissions WHERE id=$1::uuid`, id).Scan(&name); e != nil {
+			return e
+		}
+		if name == "system.admin" {
+			return identity.ErrForbidden
+		}
+		var refs int
+		if e = tx.QueryRowContext(ctx, `SELECT
+			(SELECT count(*) FROM role_permissions WHERE permission_id=$1::uuid) +
+			(SELECT count(*) FROM client_permissions WHERE permission_id=$1::uuid)`, id).Scan(&refs); e != nil {
+			return e
+		}
+		if refs != 0 {
+			return identity.ErrConflict
+		}
+		if _, e = tx.ExecContext(ctx, `DELETE FROM permissions WHERE id=$1::uuid`, id); e != nil {
+			return e
+		}
+		return audit(ctx, tx, "permission.deleted", actor.User.ID, "permission", id, a)
 	})
 }

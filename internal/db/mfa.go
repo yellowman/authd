@@ -74,6 +74,40 @@ func (s *IdentityStore) ConfirmTOTP(ctx context.Context, hash, expected []byte, 
 		return audit(ctx, tx, "mfa.enrolled", sess.User.ID, "user", sess.User.ID, a)
 	})
 }
+func (s *IdentityStore) ReplaceRecoveryCodes(ctx context.Context, hash []byte, codes [][]byte, a identity.Audit) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		sess, e := requireSession(ctx, tx, hash, false, true, false)
+		if e != nil {
+			return e
+		}
+		complete := false
+		for _, m := range sess.AuthMethods {
+			if m == "otp" || m == "recovery" {
+				complete = true
+			}
+		}
+		if !complete {
+			return identity.ErrForbidden
+		}
+		var exists bool
+		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM totp_credentials WHERE user_id=$1::uuid)`, sess.User.ID).Scan(&exists); e != nil {
+			return e
+		}
+		if !exists {
+			return identity.ErrConflict
+		}
+		if _, e = tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id=$1::uuid`, sess.User.ID); e != nil {
+			return e
+		}
+		for _, code := range codes {
+			if _, e = tx.ExecContext(ctx, `INSERT INTO recovery_codes(user_id,code_hash) VALUES($1::uuid,$2)`, sess.User.ID, code); e != nil {
+				return e
+			}
+		}
+		return audit(ctx, tx, "recovery_codes.regenerated", sess.User.ID, "user", sess.User.ID, a)
+	})
+}
+
 func (s *IdentityStore) RemoveTOTP(ctx context.Context, hash []byte, password string, a identity.Audit) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		sess, e := requireSession(ctx, tx, hash, false, true, false)

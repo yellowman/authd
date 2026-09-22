@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -33,6 +34,7 @@ type testStore struct {
 	record                                    identity.LoginRecord
 	raw                                       string
 	adminCalls, mutationCalls, sessionCreates int
+	profileEdits                              int
 	revoked                                   bool
 	loginAudit                                identity.Audit
 	loginSession                              identity.Session
@@ -57,6 +59,30 @@ func (m *testStore) CreatePermission(context.Context, []byte, string, string, id
 	m.mutationCalls++
 	return nil
 }
+func (m *testStore) SavePermission(context.Context, []byte, identity.PermissionEdit, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) DeletePermission(context.Context, []byte, string, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) DeleteRole(context.Context, []byte, string, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) DeleteUser(context.Context, []byte, string, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) ResetMFA(context.Context, []byte, string, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) ReplaceRecoveryCodes(context.Context, []byte, [][]byte, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
 func (m *testStore) AuditFailure(context.Context, string, identity.Audit) error { return nil }
 func (m *testStore) LoginRecord(_ context.Context, name string) (identity.LoginRecord, error) {
 	if name != "alice" {
@@ -73,6 +99,12 @@ func (m *testStore) CreateSession(_ context.Context, _ identity.LoginRecord, s i
 func (m *testStore) RevokeSession(context.Context, []byte, string, bool, identity.Audit) error {
 	m.mutationCalls++
 	m.revoked = true
+	return nil
+}
+func (m *testStore) EditOwnProfile(_ context.Context, _ []byte, p identity.Profile, _ identity.Audit) error {
+	m.profileEdits++
+	m.session.User.DisplayName = p.DisplayName
+	m.session.User.Email = p.Email
 	return nil
 }
 func fixture(t *testing.T, admin bool) (*Server, http.Handler, *testStore) {
@@ -199,6 +231,15 @@ func TestValidCSRFMutationWorks(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
+func TestSelfProfileEditUsesAuthenticatedIdentity(t *testing.T) {
+	s, h, m := fixture(t, false)
+	v := url.Values{"display_name": {"Alice Example"}, "email": {"alice@example.test"}, "csrf_token": {s.auth.CSRF(m.raw, "session")}}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "POST", "/account/profile", v, true))
+	if w.Code != http.StatusSeeOther || m.profileEdits != 1 || m.session.User.DisplayName != "Alice Example" || m.session.User.Email != "alice@example.test" {
+		t.Fatalf("profile edit failed: code=%d edits=%d user=%+v", w.Code, m.profileEdits, m.session.User)
+	}
+}
 func TestForcedPasswordChangeCannotReachAdmin(t *testing.T) {
 	s, h, m := fixture(t, true)
 	m.session.User.ForcePasswordChange = true
@@ -252,6 +293,29 @@ func TestLoginIssuesFreshSecureSessionAndIgnoresForwardedIP(t *testing.T) {
 		t.Fatal("trusted a spoofed forwarding header")
 	}
 }
+func TestTrustedProxyResolutionStopsAtNearestUntrustedHop(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("10.0.0.0/8")}
+	r := httptest.NewRequest(http.MethodGet, "https://auth.example.test/", nil)
+	r.RemoteAddr = "127.0.0.1:44321"
+	r.Header.Set("X-Forwarded-For", "198.51.100.9, 203.0.113.44, 10.1.2.3")
+	if got := resolvedClientIP(r, trusted); got != "203.0.113.44" {
+		t.Fatalf("client IP=%q want nearest untrusted hop", got)
+	}
+
+	// A directly untrusted peer never gets to nominate its own source address.
+	r.RemoteAddr = "192.0.2.30:44321"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+	if got := resolvedClientIP(r, trusted); got != "192.0.2.30" {
+		t.Fatalf("untrusted peer spoofed source: %q", got)
+	}
+
+	// Malformed trusted-proxy chains fail closed to the direct peer.
+	r.RemoteAddr = "127.0.0.1:44321"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1, garbage")
+	if got := resolvedClientIP(r, trusted); got != "127.0.0.1" {
+		t.Fatalf("malformed chain partially trusted: %q", got)
+	}
+}
 func TestLoginRequiresBrowserBoundCSRF(t *testing.T) {
 	s, h, m := fixture(t, false)
 	w := httptest.NewRecorder()
@@ -281,7 +345,7 @@ func TestLogoutRequiresPostAndCSRF(t *testing.T) {
 func TestAllAdminTemplatesRenderAndEscape(t *testing.T) {
 	s, h, m := fixture(t, true)
 	m.snapshot.Users[0].DisplayName = "<script>bad()</script>"
-	for _, path := range []string{"/admin/?view=users", "/admin/?view=roles", "/admin/?view=permissions", "/admin/?view=sessions", "/admin/?view=audit", "/admin/?user=" + userID, "/admin/?role=" + userID} {
+	for _, path := range []string{"/admin/?view=users", "/admin/?view=roles", "/admin/?view=permissions", "/admin/?view=sessions", "/admin/?view=audit", "/admin/?user=" + userID, "/admin/?role=" + userID, "/admin/?permission=" + userID} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, request(s, m, "GET", path, nil, true))
 		if w.Code != 200 {
@@ -318,6 +382,16 @@ func TestAllAdminTemplatesRenderAndEscape(t *testing.T) {
 	s.render(w, 200, "admin.html", clients)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "bdcmaps") {
 		t.Fatal("OIDC client administration template")
+	}
+	keys := s.data("keys")
+	keys.View = "keys"
+	keys.Session = m.session
+	keys.Admin = m.snapshot
+	keys.SigningKeys = []oidc.SigningKey{{KID: "kid-current", Algorithm: "RS256", Active: true, CreatedAt: time.Now()}}
+	w = httptest.NewRecorder()
+	s.render(w, 200, "admin.html", keys)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "kid-current") {
+		t.Fatal("signing-key administration template")
 	}
 }
 func TestNoSecretsInRequestLogs(t *testing.T) {
@@ -363,5 +437,39 @@ func TestIdentityScopeCannotBecomePermission(t *testing.T) {
 		if w.Code != 400 || m.mutationCalls != 0 {
 			t.Fatal("identity scope entered permission catalog", name)
 		}
+	}
+}
+
+func TestDestructiveAdminActionRequiresTypedConfirmation(t *testing.T) {
+	s, h, m := fixture(t, true)
+	csrf := s.auth.CSRF(m.raw, "session")
+	for _, confirm := range []string{"", "DELETE", "yes"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, request(s, m, "POST", "/admin/users/delete", url.Values{"id": {userID}, "confirm": {confirm}, "csrf_token": {csrf}}, true))
+		if w.Code != 400 || m.mutationCalls != 0 {
+			t.Fatalf("confirmation %q reached destructive store: status=%d calls=%d", confirm, w.Code, m.mutationCalls)
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "POST", "/admin/users/delete", url.Values{"id": {"00000000-0000-4000-8000-000000000002"}, "confirm": {"delete"}, "csrf_token": {csrf}}, true))
+	if w.Code != 303 || m.mutationCalls != 1 {
+		t.Fatalf("confirmed deletion status=%d calls=%d body=%s", w.Code, m.mutationCalls, w.Body.String())
+	}
+}
+
+func TestRecoveryCodeRegenerationRequiresFreshMFASession(t *testing.T) {
+	s, h, m := fixture(t, false)
+	m.session.User.MFAEnabled = true
+	csrf := s.auth.CSRF(m.raw, "session")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "POST", "/account/mfa/recovery", url.Values{"csrf_token": {csrf}}, true))
+	if w.Code != 403 || m.mutationCalls != 0 {
+		t.Fatalf("password-only session regenerated recovery codes: %d calls=%d", w.Code, m.mutationCalls)
+	}
+	m.session.AuthMethods = []string{"pwd", "otp"}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "POST", "/account/mfa/recovery", url.Values{"csrf_token": {csrf}}, true))
+	if w.Code != 200 || m.mutationCalls != 1 || !strings.Contains(w.Body.String(), "Previous unused recovery codes no longer work") {
+		t.Fatalf("MFA recovery regeneration failed: %d calls=%d body=%s", w.Code, m.mutationCalls, w.Body.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -28,6 +29,9 @@ type Config struct {
 	SessionAbsoluteTTL   time.Duration
 	RefreshIdleTTL       time.Duration
 	RefreshAbsoluteTTL   time.Duration
+	CleanupInterval      time.Duration
+	AuditRetention       time.Duration
+	TrustedProxies       []netip.Prefix
 }
 
 func Load() (Config, error) {
@@ -38,6 +42,10 @@ func Load() (Config, error) {
 	}
 	var err error
 	cfg.Development, err = envBool("AUTHD_DEVELOPMENT", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.TrustedProxies, err = trustedProxies(os.Getenv("AUTHD_TRUSTED_PROXIES"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -52,6 +60,8 @@ func Load() (Config, error) {
 		{"AUTHD_SESSION_ABSOLUTE_TTL", &cfg.SessionAbsoluteTTL, 7 * 24 * time.Hour},
 		{"AUTHD_REFRESH_IDLE_TTL", &cfg.RefreshIdleTTL, 30 * 24 * time.Hour},
 		{"AUTHD_REFRESH_ABSOLUTE_TTL", &cfg.RefreshAbsoluteTTL, 90 * 24 * time.Hour},
+		{"AUTHD_CLEANUP_INTERVAL", &cfg.CleanupInterval, time.Hour},
+		{"AUTHD_AUDIT_RETENTION", &cfg.AuditRetention, 365 * 24 * time.Hour},
 	} {
 		*field.value, err = envDuration(field.name, field.fallback)
 		if err != nil {
@@ -91,7 +101,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if cfg.AccessTokenTTL <= 0 || cfg.AuthorizationCodeTTL <= 0 || cfg.SessionIdleTTL <= 0 || cfg.SessionAbsoluteTTL <= 0 || cfg.RefreshIdleTTL <= 0 || cfg.RefreshAbsoluteTTL <= 0 {
+	if cfg.AccessTokenTTL <= 0 || cfg.AuthorizationCodeTTL <= 0 || cfg.SessionIdleTTL <= 0 || cfg.SessionAbsoluteTTL <= 0 || cfg.RefreshIdleTTL <= 0 || cfg.RefreshAbsoluteTTL <= 0 || cfg.CleanupInterval <= 0 || cfg.AuditRetention <= 0 {
 		return Config{}, errors.New("all configured TTL values must be positive")
 	}
 	if cfg.AccessTokenTTL < 30*time.Second || cfg.AccessTokenTTL > time.Hour {
@@ -109,7 +119,42 @@ func Load() (Config, error) {
 	if cfg.RefreshIdleTTL > cfg.RefreshAbsoluteTTL {
 		return Config{}, errors.New("refresh idle TTL cannot exceed refresh absolute TTL")
 	}
+	if cfg.CleanupInterval < time.Minute {
+		return Config{}, errors.New("cleanup interval must be at least one minute")
+	}
+	if cfg.AuditRetention < 24*time.Hour {
+		return Config{}, errors.New("audit retention must be at least 24 hours")
+	}
 	return cfg, nil
+}
+
+func trustedProxies(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 64 {
+		return nil, errors.New("AUTHD_TRUSTED_PROXIES contains too many prefixes")
+	}
+	seen := map[netip.Prefix]bool{}
+	out := make([]netip.Prefix, 0, len(parts))
+	for _, item := range parts {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(item))
+		if err != nil {
+			return nil, errors.New("AUTHD_TRUSTED_PROXIES must contain comma-separated CIDR prefixes")
+		}
+		prefix = prefix.Masked()
+		if prefix.Bits() == 0 {
+			return nil, errors.New("AUTHD_TRUSTED_PROXIES must not trust an entire address family")
+		}
+		if seen[prefix] {
+			return nil, errors.New("AUTHD_TRUSTED_PROXIES contains a duplicate prefix")
+		}
+		seen[prefix] = true
+		out = append(out, prefix)
+	}
+	return out, nil
 }
 
 func masterKeyFromEnv() ([]byte, error) {

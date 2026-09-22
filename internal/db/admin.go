@@ -24,7 +24,8 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		}
 		rows, e := tx.QueryContext(ctx, `SELECT `+userColumns+`,
  COALESCE((SELECT json_agg(ur.role_id::text ORDER BY ur.role_id) FROM user_roles ur WHERE ur.user_id=u.id),'[]'::json)::text,
- COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text
+ COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text,
+ EXISTS(SELECT 1 FROM totp_credentials t WHERE t.user_id=u.id)
  FROM users u WHERE u.deleted_at IS NULL ORDER BY lower(u.username) LIMIT 200`)
 		if e != nil {
 			return e
@@ -32,7 +33,7 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		for rows.Next() {
 			var u identity.User
 			var ids, names string
-			args := append(userDest(&u), &ids, &names)
+			args := append(userDest(&u), &ids, &names, &u.MFAEnabled)
 			if e = rows.Scan(args...); e != nil {
 				rows.Close()
 				return e
@@ -52,7 +53,7 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		if e != nil {
 			return e
 		}
-		rows, e = tx.QueryContext(ctx, `SELECT r.id::text,r.name,r.description,r.built_in,
+		rows, e = tx.QueryContext(ctx, `SELECT r.id::text,r.name,r.description,r.built_in,r.updated_at,
  COALESCE((SELECT json_agg(rp.permission_id::text ORDER BY rp.permission_id) FROM role_permissions rp WHERE rp.role_id=r.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(p.name ORDER BY p.name) FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id),'[]'::json)::text
  FROM roles r ORDER BY r.name LIMIT 200`)
@@ -62,7 +63,7 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		for rows.Next() {
 			var role identity.Role
 			var ids, names string
-			if e = rows.Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &ids, &names); e != nil {
+			if e = rows.Scan(&role.ID, &role.Name, &role.Description, &role.BuiltIn, &role.UpdatedAt, &ids, &names); e != nil {
 				rows.Close()
 				return e
 			}
@@ -81,13 +82,13 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		if e != nil {
 			return e
 		}
-		rows, e = tx.QueryContext(ctx, `SELECT id::text,name,description FROM permissions ORDER BY name LIMIT 200`)
+		rows, e = tx.QueryContext(ctx, `SELECT id::text,name,description,updated_at FROM permissions ORDER BY name LIMIT 200`)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
 			var p identity.Permission
-			if e = rows.Scan(&p.ID, &p.Name, &p.Description); e != nil {
+			if e = rows.Scan(&p.ID, &p.Name, &p.Description, &p.UpdatedAt); e != nil {
 				rows.Close()
 				return e
 			}

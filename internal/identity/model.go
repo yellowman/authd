@@ -13,6 +13,7 @@ type User struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	LastLoginAt         *time.Time
+	MFAEnabled          bool
 	RoleIDs             []string
 	Roles               []string
 }
@@ -22,6 +23,7 @@ type Role struct {
 	Name          string
 	Description   string
 	BuiltIn       bool
+	UpdatedAt     time.Time
 	PermissionIDs []string
 	Permissions   []string
 }
@@ -30,4 +32,5 @@ type Permission struct {
 	ID          string
 	Name        string
 	Description string
+	UpdatedAt   time.Time
 }

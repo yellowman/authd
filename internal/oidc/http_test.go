@@ -197,6 +197,13 @@ func (f *fakeOIDCStore) InstallSigningKey(_ context.Context, k SigningKey, rotat
 	return k, nil
 }
 
+func (f *fakeOIDCStore) AdminSigningKeys(_ context.Context, _ []byte) ([]SigningKey, error) {
+	return f.SigningKeys(context.Background())
+}
+func (f *fakeOIDCStore) RotateSigningKey(_ context.Context, _ []byte, k SigningKey, _ identity.Audit) (SigningKey, error) {
+	return f.InstallSigningKey(context.Background(), k, true)
+}
+
 func (f *fakeOIDCStore) AdminClients(_ context.Context, _ []byte) ([]Client, error) {
 	return []Client{f.client}, nil
 }
@@ -219,6 +226,10 @@ func (f *fakeOIDCStore) UpdateClient(_ context.Context, _ []byte, edit ClientEdi
 }
 func (f *fakeOIDCStore) RotateClientSecret(_ context.Context, _ []byte, _ string, secret []byte, _ identity.Audit) error {
 	f.client.SecretHash = secret
+	return nil
+}
+func (f *fakeOIDCStore) DeleteClient(_ context.Context, _ []byte, _ string, _ identity.Audit) error {
+	f.client = Client{}
 	return nil
 }
 
@@ -514,7 +525,7 @@ func TestSigningKeyRotationRetainsOldVerificationKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated, err := svc.RotateSigningKey(context.Background())
+	rotated, err := svc.RotateSigningKey(context.Background(), sessionRaw, identity.Audit{})
 	if err != nil {
 		t.Fatal(err)
 	}

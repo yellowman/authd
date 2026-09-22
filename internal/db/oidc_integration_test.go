@@ -22,7 +22,7 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 	systemAdminPermission := findPermission(t, adminData, "system.admin")
 	adminRole := findRole(t, adminData, "system-admin")
 	adminRole.PermissionIDs = append(adminRole.PermissionIDs, perm.ID)
-	require(t, identityStore.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: adminRole.ID, Name: adminRole.Name, Description: adminRole.Description, PermissionIDs: adminRole.PermissionIDs}, auditFixture))
+	require(t, identityStore.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{ID: adminRole.ID, Name: adminRole.Name, Description: adminRole.Description, PermissionIDs: adminRole.PermissionIDs, ExpectedUpdatedAt: adminRole.UpdatedAt}, auditFixture))
 	actor, err = identityStore.Session(ctx, actor.TokenHash, time.Hour)
 	require(t, err)
 
@@ -37,6 +37,16 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 	require(t, err)
 	if client.ClientID != "bdcmaps" || len(client.PermissionIDs) != 1 || client.Permissions[0] != "bdcmaps.read" {
 		t.Fatalf("unexpected client %#v", client)
+	}
+	clientEdit := oidc.ClientEdit{
+		ID: client.ID, ClientID: client.ClientID, Name: "BDC Maps Updated", Type: client.Type, Enabled: client.Enabled,
+		RefreshTokensEnabled: client.RefreshTokensEnabled, RequireMFA: client.RequireMFA, AccessTokenTTL: client.AccessTokenTTL,
+		RedirectURIs: client.RedirectURIs, LogoutURIs: client.LogoutURIs, IdentityScopes: client.IdentityScopes, PermissionIDs: client.PermissionIDs,
+		ExpectedUpdatedAt: client.UpdatedAt,
+	}
+	require(t, store.UpdateClient(ctx, actor.TokenHash, clientEdit, auditFixture))
+	if err = store.UpdateClient(ctx, actor.TokenHash, clientEdit, auditFixture); !errors.Is(err, identity.ErrConflict) {
+		t.Fatalf("stale client edit accepted: %v", err)
 	}
 	_, err = store.CreateClient(ctx, actor.TokenHash, oidc.ClientEdit{
 		ClientID: "bad-admin-scope", Name: "Bad", Type: "public", Enabled: true, AccessTokenTTL: time.Minute,
@@ -101,10 +111,20 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 		t.Fatal("active signing key mismatch")
 	}
 	second := oidc.SigningKey{KID: "integration-key-2", Algorithm: "RS256", Ciphertext: []byte("encrypted-fixture-2"), PublicJWK: []byte(`{"kty":"RSA","use":"sig","alg":"RS256","kid":"integration-key-2","n":"AQ","e":"AQAB"}`)}
-	rotatedKey, err := store.InstallSigningKey(ctx, second, true)
+	rotatedKey, err := store.RotateSigningKey(ctx, actor.TokenHash, second, auditFixture)
 	require(t, err)
 	if rotatedKey.KID == installed.KID {
 		t.Fatal("signing rotation did not replace active key")
+	}
+	adminKeys, err := store.AdminSigningKeys(ctx, actor.TokenHash)
+	require(t, err)
+	if len(adminKeys) != 2 {
+		t.Fatalf("admin signing key list=%d want=2", len(adminKeys))
+	}
+	for _, listed := range adminKeys {
+		if len(listed.Ciphertext) != 0 {
+			t.Fatal("admin key listing exposed private-key ciphertext")
+		}
 	}
 	old, err := store.SigningKey(ctx, installed.KID)
 	require(t, err)
@@ -119,5 +139,32 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 	 FROM audit_events`).Scan(&keyCreated, &keyRotated, &keyRetired))
 	if keyCreated != 1 || keyRotated != 1 || keyRetired != 1 {
 		t.Fatalf("signing key audit counts created=%d rotated=%d retired=%d", keyCreated, keyRotated, keyRetired)
+	}
+
+	// Client deletion is a destructive revocation boundary. All durable grant
+	// state owned by the client is removed by foreign-key cascades, while
+	// already-issued short-lived JWTs are left to expire normally.
+	deleteRefresh := token(t)
+	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, client.ID, []string{"openid"}, actor.AuthTime, actor.AuthMethods, identity.Hash(deleteRefresh), now.Add(time.Hour), now.Add(2*time.Hour)))
+	deleteRequest := token(t)
+	require(t, store.CreateAuthorizationRequest(ctx, identity.Hash(deleteRequest), oidc.AuthorizationRequest{
+		ClientID: client.ClientID, RedirectURI: client.RedirectURIs[0], Scopes: []string{"openid"}, CodeChallenge: "delete-challenge", CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}))
+	require(t, store.DeleteClient(ctx, actor.TokenHash, client.ID, auditFixture))
+	if _, err = store.Client(ctx, client.ClientID); !errors.Is(err, oidc.ErrInvalidClient) {
+		t.Fatalf("deleted client remained addressable: %v", err)
+	}
+	var ownedRows int
+	require(t, identityStore.DB.QueryRowContext(ctx, `SELECT
+		(SELECT count(*) FROM refresh_token_families WHERE client_id=$1::uuid) +
+		(SELECT count(*) FROM authorization_requests WHERE client_id=$1::uuid) +
+		(SELECT count(*) FROM authorization_codes WHERE client_id=$1::uuid)`, client.ID).Scan(&ownedRows))
+	if ownedRows != 0 {
+		t.Fatalf("deleted client retained grant state: %d rows", ownedRows)
+	}
+	var deleteAudits int
+	require(t, identityStore.DB.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE event_type='client.deleted' AND target_id=$1`, client.ID).Scan(&deleteAudits))
+	if deleteAudits != 1 {
+		t.Fatalf("client deletion audit count=%d", deleteAudits)
 	}
 }

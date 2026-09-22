@@ -69,6 +69,34 @@ func run() error {
 	if err = oidcService.EnsureSigningKey(ctx); err != nil {
 		return err
 	}
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		stats, cleanupErr := db.CleanupExpired(cleanupCtx, pool, time.Now().UTC(), cfg.AuditRetention)
+		if cleanupErr != nil {
+			if !errors.Is(cleanupErr, context.Canceled) {
+				slog.Warn("expired-state cleanup failed", "error", cleanupErr)
+			}
+			return
+		}
+		total := stats.AuthorizationRequests + stats.AuthorizationCodes + stats.Sessions + stats.PendingTOTP + stats.BootstrapTokens + stats.RefreshFamilies + stats.AuditEvents
+		if total != 0 {
+			slog.Info("expired state cleaned", "rows", total)
+		}
+	}
+	cleanup()
+	go func() {
+		ticker := time.NewTicker(cfg.CleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cleanup()
+			}
+		}
+	}()
 	provider := oidc.NewHTTP(oidcService, cfg.Issuer, cfg.Development)
 	app, err := webserver.New(cfg, service, pool.PingContext, provider)
 	if err != nil {

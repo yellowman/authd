@@ -47,10 +47,12 @@ func TestConfigurationFailsClosed(t *testing.T) {
 		{"remote_dev_origin", "AUTHD_ISSUER", "http://example.test"},
 		{"public_dev_bind", "AUTHD_LISTEN", "0.0.0.0:8080"},
 		{"bad_port", "AUTHD_LISTEN", "127.0.0.1:99999"},
+		{"short_cleanup", "AUTHD_CLEANUP_INTERVAL", "30s"},
+		{"short_audit_retention", "AUTHD_AUDIT_RETENTION", "1h"},
 		{"ambiguous_key", "AUTHD_MASTER_KEY_FILE", "/unused"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			for _, name := range []string{"AUTHD_MASTER_KEY_FILE", "AUTHD_ACCESS_TOKEN_TTL", "AUTHD_AUTH_CODE_TTL", "AUTHD_SESSION_IDLE_TTL", "AUTHD_SESSION_ABSOLUTE_TTL", "AUTHD_REFRESH_IDLE_TTL", "AUTHD_REFRESH_ABSOLUTE_TTL"} {
+			for _, name := range []string{"AUTHD_MASTER_KEY_FILE", "AUTHD_ACCESS_TOKEN_TTL", "AUTHD_AUTH_CODE_TTL", "AUTHD_SESSION_IDLE_TTL", "AUTHD_SESSION_ABSOLUTE_TTL", "AUTHD_REFRESH_IDLE_TTL", "AUTHD_REFRESH_ABSOLUTE_TTL", "AUTHD_CLEANUP_INTERVAL", "AUTHD_AUDIT_RETENTION", "AUTHD_TRUSTED_PROXIES"} {
 				t.Setenv(name, "")
 			}
 			t.Setenv("AUTHD_ISSUER", "http://127.0.0.1:8080")
@@ -63,6 +65,25 @@ func TestConfigurationFailsClosed(t *testing.T) {
 				t.Fatal("invalid configuration accepted")
 			}
 		})
+	}
+}
+
+func TestTrustedProxyConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+		ok   bool
+	}{
+		{"", 0, true},
+		{"127.0.0.1/32, 10.0.0.0/8, ::1/128", 3, true},
+		{"127.0.0.1/32,127.0.0.1/32", 0, false},
+		{"0.0.0.0/0", 0, false},
+		{"not-a-prefix", 0, false},
+	} {
+		got, err := trustedProxies(tc.raw)
+		if (err == nil) != tc.ok || (err == nil && len(got) != tc.want) {
+			t.Fatalf("trustedProxies(%q) len=%d err=%v", tc.raw, len(got), err)
+		}
 	}
 }
 

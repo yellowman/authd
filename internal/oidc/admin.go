@@ -132,6 +132,9 @@ func (s *Service) CreateClient(ctx context.Context, actorRaw string, edit Client
 	return client, secret, nil
 }
 func (s *Service) UpdateClient(ctx context.Context, actorRaw string, edit ClientEdit, a identity.Audit) error {
+	if edit.ExpectedUpdatedAt.IsZero() {
+		return identity.Invalid("missing client version")
+	}
 	var err error
 	if edit, err = validateClientEdit(edit); err != nil {
 		return err
@@ -155,10 +158,27 @@ func (s *Service) RotateClientSecret(ctx context.Context, actorRaw, clientID str
 	return secret, nil
 }
 
-func (s *Service) RotateSigningKey(ctx context.Context) (SigningKey, error) {
+func (s *Service) DeleteClient(ctx context.Context, actorRaw, clientID string, a identity.Audit) error {
+	if !cryptoutil.ValidToken(actorRaw) || !identity.ValidID(clientID) {
+		return identity.ErrSession
+	}
+	return s.Store.DeleteClient(ctx, identity.Hash(actorRaw), clientID, a)
+}
+
+func (s *Service) AdminSigningKeys(ctx context.Context, actorRaw string) ([]SigningKey, error) {
+	if !cryptoutil.ValidToken(actorRaw) {
+		return nil, identity.ErrSession
+	}
+	return s.Store.AdminSigningKeys(ctx, identity.Hash(actorRaw))
+}
+
+func (s *Service) RotateSigningKey(ctx context.Context, actorRaw string, a identity.Audit) (SigningKey, error) {
+	if !cryptoutil.ValidToken(actorRaw) {
+		return SigningKey{}, identity.ErrSession
+	}
 	generated, err := generateSigningKey(s.masterKey)
 	if err != nil {
 		return SigningKey{}, err
 	}
-	return s.Store.InstallSigningKey(ctx, generated, true)
+	return s.Store.RotateSigningKey(ctx, identity.Hash(actorRaw), generated, a)
 }

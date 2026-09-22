@@ -1,4 +1,4 @@
-# Implementation sequence — v0.5
+# Implementation sequence — v0.6
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -33,7 +33,7 @@ actual bdcmaps login remain the first external gates.
 - [x] RS256 ID/access tokens, explicit audience/client binding, JWKS, and UserInfo.
 - [x] Opaque refresh rotation, persistent scope narrowing, current-grant evaluation.
 - [x] Refresh-family replay detection, revocation, and RP-initiated logout.
-- [x] OIDC client create/edit/secret rotation in the admin UI.
+- [x] OIDC client create/edit/delete/secret rotation in the admin UI.
 - [x] Protocol-level bdcmaps-shaped in-memory end-to-end regression.
 - [ ] Run `docs/BDCMAPS_INTEGRATION.md` against the actual private bdcmaps app.
 - [ ] Run an independent OIDC/OAuth interoperability/conformance suite.
@@ -48,14 +48,18 @@ actual bdcmaps login remain the first external gates.
 
 ## Administration completion and operations
 
-- [ ] User/role/permission deletion with reference and last-admin safeguards.
-- [ ] Permission editing and role/permission/user pagination.
-- [ ] Per-row optimistic concurrency checks for simultaneous admin editors.
-- [ ] Signing-key rotation UI and reviewed rotation/retention schedule.
-- [ ] Administrative MFA reset; recovery-code regeneration; safe break-glass process.
-- [ ] QR display; self-service profile editing.
-- [ ] Expired authorization/session/token/enrollment cleanup and bounded audit retention.
-- [ ] Explicit trusted-proxy IP parsing and deployment rate-limit guidance.
+- [x] User/role/permission deletion with reference and last-admin safeguards.
+- [x] Permission editing.
+- [ ] Role/permission/user pagination.
+- [x] Per-row optimistic concurrency checks for simultaneous admin editors.
+- [x] Signing-key inventory and rotation UI.
+- [ ] Reviewed signing-key rotation/retention/deletion schedule.
+- [x] Administrative MFA reset and recent-MFA recovery-code regeneration.
+- [ ] Safe break-glass process.
+- [x] Self-service profile editing with email-verification clearing.
+- [ ] TOTP QR display.
+- [x] Expired authorization/session/token/enrollment cleanup and bounded audit retention.
+- [x] Explicit trusted-proxy IP parsing and deployment rate-limit guidance.
 - [ ] Operator-visible internal error classification without leaking secrets.
 - [ ] Backup/restore, master-key rotation, dedicated migration/runtime DB roles.
 - [ ] Dependency/vulnerability checks.

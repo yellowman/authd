@@ -30,6 +30,7 @@ type UserEdit struct {
 	Profile
 	Enabled, ForcePasswordChange, VerifyEmail bool
 	RoleIDs                                   []string
+	ExpectedUpdatedAt                         time.Time
 }
 type Factor struct {
 	Ciphertext  []byte
@@ -84,6 +85,11 @@ type AdminData struct {
 type RoleEdit struct {
 	ID, Name, Description string
 	PermissionIDs         []string
+	ExpectedUpdatedAt     time.Time
+}
+type PermissionEdit struct {
+	ID, Name, Description string
+	ExpectedUpdatedAt     time.Time
 }
 
 // Passwords has a single real production implementation in internal/password.
@@ -105,16 +111,23 @@ type Store interface {
 	Session(context.Context, []byte, time.Duration) (Session, error)
 	Sessions(context.Context, []byte) ([]Session, error)
 	RevokeSession(context.Context, []byte, string, bool, Audit) error
+	EditOwnProfile(context.Context, []byte, Profile, Audit) error
 	ChangePassword(context.Context, []byte, string, string, Audit) error
 	AdminData(context.Context, []byte) (AdminData, error)
 	CreateUser(context.Context, []byte, NewUser, Audit) error
 	EditUser(context.Context, []byte, UserEdit, Audit) error
+	DeleteUser(context.Context, []byte, string, Audit) error
 	ResetPassword(context.Context, []byte, string, string, bool, Audit) error
+	ResetMFA(context.Context, []byte, string, Audit) error
 	SaveRole(context.Context, []byte, RoleEdit, Audit) error
+	DeleteRole(context.Context, []byte, string, Audit) error
 	CreatePermission(context.Context, []byte, string, string, Audit) error
+	SavePermission(context.Context, []byte, PermissionEdit, Audit) error
+	DeletePermission(context.Context, []byte, string, Audit) error
 	BeginTOTP(context.Context, []byte, string, []byte, Audit) error
 	PendingTOTP(context.Context, []byte) (PendingTOTP, error)
 	ConfirmTOTP(context.Context, []byte, []byte, int64, [][]byte, Audit) error
+	ReplaceRecoveryCodes(context.Context, []byte, [][]byte, Audit) error
 	RemoveTOTP(context.Context, []byte, string, Audit) error
 	AuditFailure(context.Context, string, Audit) error
 }

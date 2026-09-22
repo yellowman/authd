@@ -142,6 +142,17 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	d.Notice = "Password changed. All provider sessions and refresh-token families were revoked. Sign in with your new password."
 	s.render(w, 200, "message.html", d)
 }
+func (s *Server) editOwnProfile(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, false, false)
+	if !ok {
+		return
+	}
+	if err := s.auth.EditOwnProfile(r.Context(), raw, r.PostForm.Get("display_name"), r.PostForm.Get("email"), auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/account", http.StatusSeeOther)
+}
 func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request) {
 	admin := r.URL.Path == "/admin/sessions/revoke"
 	sess, raw, ok := s.user(w, r, admin, !admin)
@@ -211,6 +222,23 @@ func (s *Server) removeTOTP(w http.ResponseWriter, r *http.Request) {
 	d.Notice = "The authenticator and recovery codes were removed. All provider sessions and refresh-token families were revoked."
 	s.render(w, 200, "message.html", d)
 }
+func (s *Server) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	sess, raw, ok := s.user(w, r, false, false)
+	if !ok {
+		return
+	}
+	codes, err := s.auth.RegenerateRecoveryCodes(r.Context(), raw, auditInfo(w, r))
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	d := s.data("Save your new recovery codes")
+	d.Session = sess
+	d.CSRF = s.auth.CSRF(raw, "session")
+	d.RecoveryCodes = codes
+	d.Notice = "Previous unused recovery codes no longer work. Save these new codes now; they are shown only once."
+	s.render(w, 200, "mfa.html", d)
+}
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	sess, raw, ok := s.user(w, r, true, false)
 	if !ok {
@@ -227,7 +255,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	d.CSRF = s.auth.CSRF(raw, "session")
 	d.View = r.URL.Query().Get("view")
 	switch d.View {
-	case "users", "roles", "permissions", "clients", "sessions", "audit":
+	case "users", "roles", "permissions", "clients", "sessions", "keys", "audit":
 	default:
 		d.View = "users"
 	}
@@ -250,6 +278,14 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			}
 			d.View = "clients"
 		}
+	}
+	if d.View == "keys" {
+		keys, e := s.oidc.AdminSigningKeys(r.Context(), raw)
+		if e != nil {
+			s.failure(w, r, e)
+			return
+		}
+		d.SigningKeys = keys
 	}
 	if id := r.URL.Query().Get("user"); id != "" {
 		for i := range data.Users {
@@ -275,6 +311,18 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		d.View = "roles"
 	}
+	if id := r.URL.Query().Get("permission"); id != "" {
+		for i := range data.Permissions {
+			if data.Permissions[i].ID == id {
+				d.SelectedPermission = &data.Permissions[i]
+			}
+		}
+		if d.SelectedPermission == nil {
+			http.NotFound(w, r)
+			return
+		}
+		d.View = "permissions"
+	}
 	if time.Since(sess.AuthTime) > 10*time.Minute {
 		d.Notice = "You can read administration. Sign in again before making changes; privileged writes require fresh authentication."
 	}
@@ -282,6 +330,17 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 }
 func profile(r *http.Request) identity.Profile {
 	return identity.Profile{Username: r.PostForm.Get("username"), DisplayName: r.PostForm.Get("display_name"), Email: r.PostForm.Get("email")}
+}
+func editVersion(r *http.Request) (time.Time, error) {
+	raw := strings.TrimSpace(r.PostForm.Get("expected_updated_at"))
+	if raw == "" {
+		return time.Time{}, identity.Invalid("missing record version; reload the page before saving")
+	}
+	v, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, identity.Invalid("invalid record version; reload the page before saving")
+	}
+	return v.UTC(), nil
 }
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	_, raw, ok := s.user(w, r, true, false)
@@ -300,7 +359,12 @@ func (s *Server) editUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	edit := identity.UserEdit{ID: r.PostForm.Get("id"), Profile: profile(r), Enabled: r.PostForm.Get("enabled") == "on", ForcePasswordChange: r.PostForm.Get("force_password_change") == "on", VerifyEmail: r.PostForm.Get("email_verified") == "on", RoleIDs: r.PostForm["roles"]}
+	version, err := editVersion(r)
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	edit := identity.UserEdit{ID: r.PostForm.Get("id"), Profile: profile(r), Enabled: r.PostForm.Get("enabled") == "on", ForcePasswordChange: r.PostForm.Get("force_password_change") == "on", VerifyEmail: r.PostForm.Get("email_verified") == "on", RoleIDs: r.PostForm["roles"], ExpectedUpdatedAt: version}
 	if err := s.auth.EditUser(r.Context(), raw, edit, auditInfo(w, r)); err != nil {
 		s.failure(w, r, err)
 		return
@@ -319,17 +383,83 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/admin/?view=users", 303)
 }
+func (s *Server) resetUserMFA(w http.ResponseWriter, r *http.Request) {
+	sess, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	id := r.PostForm.Get("id")
+	if err := s.auth.ResetMFA(r.Context(), raw, id, auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	if id == sess.User.ID {
+		s.setCookie(w, "session", "", 0)
+		d := s.data("Authenticator reset")
+		d.Notice = "Your authenticator and recovery codes were reset. Your provider sessions and refresh grants were revoked; sign in again."
+		s.render(w, 200, "message.html", d)
+		return
+	}
+	http.Redirect(w, r, "/admin/?user="+id, http.StatusSeeOther)
+}
+func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
+	sess, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	id := r.PostForm.Get("id")
+	if r.PostForm.Get("confirm") != "delete" {
+		s.failure(w, r, identity.Invalid("type delete to confirm user deletion"))
+		return
+	}
+	if err := s.auth.DeleteUser(r.Context(), raw, id, auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	if id == sess.User.ID {
+		s.setCookie(w, "session", "", 0)
+		d := s.data("Account deleted")
+		d.Notice = "Your local authd account was deleted and all credentials and provider sessions were revoked."
+		s.render(w, 200, "message.html", d)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=users", http.StatusSeeOther)
+}
 func (s *Server) saveRole(w http.ResponseWriter, r *http.Request) {
 	_, raw, ok := s.user(w, r, true, false)
 	if !ok {
 		return
 	}
-	err := s.auth.SaveRole(r.Context(), raw, identity.RoleEdit{ID: r.PostForm.Get("id"), Name: r.PostForm.Get("name"), Description: r.PostForm.Get("description"), PermissionIDs: r.PostForm["permissions"]}, auditInfo(w, r))
+	var version time.Time
+	var err error
+	if r.PostForm.Get("id") != "" {
+		version, err = editVersion(r)
+		if err != nil {
+			s.failure(w, r, err)
+			return
+		}
+	}
+	err = s.auth.SaveRole(r.Context(), raw, identity.RoleEdit{ID: r.PostForm.Get("id"), Name: r.PostForm.Get("name"), Description: r.PostForm.Get("description"), PermissionIDs: r.PostForm["permissions"], ExpectedUpdatedAt: version}, auditInfo(w, r))
 	if err != nil {
 		s.failure(w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/admin/?view=roles", 303)
+}
+func (s *Server) deleteRole(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	if r.PostForm.Get("confirm") != "delete" {
+		s.failure(w, r, identity.Invalid("type delete to confirm role deletion"))
+		return
+	}
+	if err := s.auth.DeleteRole(r.Context(), raw, r.PostForm.Get("id"), auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=roles", http.StatusSeeOther)
 }
 func splitLines(raw string) []string {
 	var out []string
@@ -346,7 +476,14 @@ func clientEdit(r *http.Request) (oidc.ClientEdit, error) {
 	if err != nil {
 		return oidc.ClientEdit{}, identity.Invalid("access token lifetime must be seconds")
 	}
-	return oidc.ClientEdit{ID: r.PostForm.Get("id"), ClientID: r.PostForm.Get("client_id"), Name: r.PostForm.Get("name"), Type: r.PostForm.Get("client_type"), Enabled: r.PostForm.Get("enabled") == "on", RequireMFA: r.PostForm.Get("require_mfa") == "on", RefreshTokensEnabled: r.PostForm.Get("refresh_tokens_enabled") == "on", AccessTokenTTL: time.Duration(ttl) * time.Second, RedirectURIs: splitLines(r.PostForm.Get("redirect_uris")), LogoutURIs: splitLines(r.PostForm.Get("logout_uris")), IdentityScopes: r.PostForm["identity_scopes"], PermissionIDs: r.PostForm["permissions"]}, nil
+	var version time.Time
+	if r.PostForm.Get("id") != "" {
+		version, err = editVersion(r)
+		if err != nil {
+			return oidc.ClientEdit{}, err
+		}
+	}
+	return oidc.ClientEdit{ID: r.PostForm.Get("id"), ClientID: r.PostForm.Get("client_id"), Name: r.PostForm.Get("name"), Type: r.PostForm.Get("client_type"), Enabled: r.PostForm.Get("enabled") == "on", RequireMFA: r.PostForm.Get("require_mfa") == "on", RefreshTokensEnabled: r.PostForm.Get("refresh_tokens_enabled") == "on", AccessTokenTTL: time.Duration(ttl) * time.Second, RedirectURIs: splitLines(r.PostForm.Get("redirect_uris")), LogoutURIs: splitLines(r.PostForm.Get("logout_uris")), IdentityScopes: r.PostForm["identity_scopes"], PermissionIDs: r.PostForm["permissions"], ExpectedUpdatedAt: version}, nil
 }
 func (s *Server) createClient(w http.ResponseWriter, r *http.Request) {
 	_, raw, ok := s.user(w, r, true, false)
@@ -404,6 +541,22 @@ func (s *Server) rotateClientSecret(w http.ResponseWriter, r *http.Request) {
 	s.render(w, 200, "client_secret.html", d)
 }
 
+func (s *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	if r.PostForm.Get("confirm") != "delete" {
+		s.failure(w, r, identity.Invalid("type delete to confirm client deletion"))
+		return
+	}
+	if err := s.oidc.DeleteClient(r.Context(), raw, r.PostForm.Get("id"), auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=clients", http.StatusSeeOther)
+}
+
 func (s *Server) createPermission(w http.ResponseWriter, r *http.Request) {
 	_, raw, ok := s.user(w, r, true, false)
 	if !ok {
@@ -414,4 +567,47 @@ func (s *Server) createPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/?view=permissions", 303)
+}
+func (s *Server) savePermission(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	version, err := editVersion(r)
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	edit := identity.PermissionEdit{ID: r.PostForm.Get("id"), Name: r.PostForm.Get("name"), Description: r.PostForm.Get("description"), ExpectedUpdatedAt: version}
+	if err := s.auth.SavePermission(r.Context(), raw, edit, auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=permissions", http.StatusSeeOther)
+}
+func (s *Server) deletePermission(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	if r.PostForm.Get("confirm") != "delete" {
+		s.failure(w, r, identity.Invalid("type delete to confirm permission deletion"))
+		return
+	}
+	if err := s.auth.DeletePermission(r.Context(), raw, r.PostForm.Get("id"), auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=permissions", http.StatusSeeOther)
+}
+func (s *Server) rotateSigningKey(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	if _, err := s.oidc.RotateSigningKey(r.Context(), raw, auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=keys", http.StatusSeeOther)
 }

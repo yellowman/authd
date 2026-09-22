@@ -5,15 +5,28 @@ credentials, roles, permissions, MFA, provider sessions, and OIDC once; let many
 applications consume the same identity. The first relying-party target is
 `yellowman/bdcmaps`.
 
-## v0.5 — OIDC provider implementation
+## v0.6 — lifecycle and operations
 
-v0.5 adds the protocol path on top of the v0.4 local-identity implementation.
+v0.6 closes the first operational lifecycle gaps on top of the v0.5 OIDC provider.
 **This is implemented source, not production qualification.** The authoring
 environment cannot run PostgreSQL, download the selected Go 1.25 toolchain/modules,
 or run the actual private bdcmaps application. See `VALIDATION.md` for the exact
 evidence boundary.
 
 Implemented in this revision:
+
+- Soft deletion of local users with credential, MFA, role, session, authorization-code, and refresh-family teardown; the immutable identity row remains for audit/sub continuity.
+- Deletion of non-built-in roles with transactional final-administrator protection.
+- Permission editing and reference-safe deletion; `system.admin` cannot be renamed or deleted.
+- Administrative MFA reset that revokes the affected user's live provider sessions and refresh capability.
+- Self-service profile editing with email-verification clearing, plus recovery-code regeneration restricted to a recent MFA-authenticated session.
+- Destructive OIDC-client deletion with foreign-key-cascade removal of durable authorization requests, codes, scopes, redirects, secrets, and refresh families.
+- Administrator signing-key inventory and signing-key rotation UI; private-key ciphertext is never exposed by the listing.
+- Periodic bounded-state cleanup for expired authorization continuations/codes, sessions, pending TOTP enrollment, old bootstrap tokens, absolutely expired refresh families, and configurable audit retention. Signing keys are deliberately excluded from automatic cleanup.
+- New PostgreSQL integration cases for destructive lifecycle invariants, client deletion cascades, recovery regeneration/MFA reset, signing-key administration, cleanup, and fresh-session self-profile changes.
+- Explicit trusted-proxy CIDR configuration with right-to-left `X-Forwarded-For` resolution; untrusted peers and malformed chains cannot spoof audit/rate-limit source IPs.
+
+The v0.5 provider functionality remains:
 
 - OpenID Connect discovery and OAuth authorization-server metadata.
 - Encrypted persisted 3072-bit RSA signing keys, RS256 JWTs, JWKS publication,
@@ -42,7 +55,7 @@ Implemented in this revision:
 - Token refresh/replay/revocation audit events and server-side prevention of
   granting the provider-only `system.admin` permission to an OAuth client.
 
-The v0.4 identity functionality remains: one-time bootstrap, Argon2id passwords,
+The v0.4 identity functionality also remains: one-time bootstrap, Argon2id passwords,
 local roles/permissions, provider sessions, password lifecycle, TOTP/recovery
 codes, audit, account UI, and transactionally rechecked administration.
 
@@ -92,6 +105,18 @@ credentials and sessions are under `/account`.
 Keep the master key. It encrypts TOTP seeds and OIDC signing private keys. Changing
 or losing it makes those encrypted values unreadable.
 
+When authd is behind a reverse proxy, leave forwarded-header trust disabled unless the
+direct proxy addresses are known. Configure only those networks, for example:
+
+```sh
+export AUTHD_TRUSTED_PROXIES='127.0.0.1/32,::1/128'
+```
+
+`X-Forwarded-For` is ignored from every other peer. For a trusted proxy chain, authd
+walks right-to-left and uses the nearest untrusted address as the client source. Login
+rate limits remain process-local, so a multi-instance deployment requires a different
+rate-limit design rather than merely widening this proxy list.
+
 ### Register bdcmaps
 
 After signing in as an administrator:
@@ -137,16 +162,16 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
   environment, and actual bdcmaps interoperability remains an external gate.
 - There is no user consent screen; registered applications are trusted internal
   clients and authorization is based on their configured scope allow-list.
-- Signing-key rotation is implemented in the service/store but does not yet have
-  an administrator button or automatic rotation schedule.
-- User/role/permission deletion, permission editing, pagination, optimistic admin
-  concurrency, administrative MFA reset, recovery-code regeneration, QR rendering,
-  profile self-editing, expired-row cleanup, and backup/master-key rotation remain.
+- Signing-key inventory and manual rotation are implemented; automatic rotation and
+  an explicit public-key deletion/retention schedule remain.
+- Pagination, TOTP QR rendering, safe break-glass recovery, and backup/master-key
+  rotation remain. Admin edit forms carry row versions and stale concurrent saves are
+  rejected transactionally.
 - JWT access tokens intentionally remain valid until their short expiry after a
   user/session change; refresh and new authorization re-evaluate current grants.
 - Rate limits are process-local and deployments currently assume one active authd
-  instance. Forwarded IP headers are intentionally ignored until trusted-proxy
-  handling is explicit.
+  instance. Forwarded IPs are honored only through the explicit trusted-proxy CIDR
+  configuration described above.
 - OIDC conformance-suite and independent third-party client coverage remain
   qualification work; passing our protocol tests is not a conformance certificate.
 
