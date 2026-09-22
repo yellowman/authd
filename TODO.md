@@ -1,8 +1,9 @@
-# Implementation sequence — v0.9.0
+# Implementation sequence — v0.9.1
 
-Checked items mean implemented source with the local evidence in `VALIDATION.md`,
-not production qualification. Real PostgreSQL/dependency-backed execution and an
-actual bdcmaps login remain the first external gates.
+Checked implementation items mean source is present, not production qualification.
+Qualification items identify reported or locally executed evidence explicitly in
+`VALIDATION.md`. The v0.9.0 external PostgreSQL/build/live-provider pass is now
+recorded; actual bdcmaps and production deployment checks remain open.
 
 ## Identity delivery
 
@@ -58,8 +59,12 @@ actual bdcmaps login remain the first external gates.
 
 - [x] Real-PostgreSQL integration test source and non-skipping gate definition.
 - [x] OIDC SQL lifecycle integration source added to that gate.
-- [ ] Run the NEW v0.9.0 migration/atomicity/concurrency integration suite against PostgreSQL with the actual pgx driver (earlier revision was externally tested).
-- [ ] Rerun the v0.9.0 full build/tests/vet with the pinned modules on OpenBSD/amd64 or Linux (earlier external lock state is retained).
+- [x] External v0.9.0 `make verify-openbsd` PostgreSQL integration pass reported by the user; raw log not supplied.
+- [x] External v0.9.0 formatting/tests/vet/build and deployment syntax pass reported via `make verify-openbsd`.
+- [x] External v0.9.0 greenfield database/roles, owner migration, runtime grants/bootstrap reported PASS.
+- [x] External v0.9.0 live consent/PKCE/client_secret_post/ID-claims/UserInfo/refresh/code-replay flow reported PASS.
+- [ ] Negative runtime-role privilege checks (DDL/owner assumption denied); not explicitly established by the summary.
+- [ ] v0.8.4 → v0.9.0 migration against a restored existing database, rather than only greenfield.
 - [ ] Full browser automation against the actual daemon and database (live setup/login forms were exercised manually).
 - [ ] Full race-detector suite on a supported Go platform (OpenBSD/amd64 does not support `-race`).
 

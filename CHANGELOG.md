@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.1 — 2026-09-22
+
+Documentation/qualification update only; no runtime, dependency, migration,
+privilege-statement, Makefile or native-service changes. Standardized the native
+PostgreSQL administrator procedure on `psql -Upostgres` with explicit `-dpostgres`
+for cluster bootstrap and `-dauthd` with `authd_owner` for runtime grants. Replaced
+the interactive password-meta-command instructions with explicit SQL password
+assignment from a private temporary file, including credential/logging cautions.
+Updated SQL comments/operator guidance and fixed README's stale `make deps` text.
+
+Recorded the user-supplied v0.9.0 external OpenBSD/PostgreSQL/live-OIDC PASS report
+separately from authoring-environment tests. Raw logs were not supplied. The actual
+BDC callback, HTTPS/proxying, native installation, live MFA, Linux race/systemd
+and other unreported qualification gates remain open. No new migration, credential
+rotation or daemon restart is required solely for this documentation update.
+
 ## v0.9.0 — 2026-09-22
 
 Substantive OIDC/security/performance audit of v0.8.4. Rebuilt code and refresh

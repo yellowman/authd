@@ -25,7 +25,8 @@ explicit owner-credential step rather than an install-time side effect.
 
 ## 1. Trust boundaries
 
-There are three distinct PostgreSQL/OS identities. Do not collapse them:
+There are three PostgreSQL identities, plus a separate Unix service account.
+Do not collapse them:
 
 ```text
 PostgreSQL cluster administrator
@@ -108,27 +109,27 @@ rather than copying the loopback example.
 Run the checked-in cluster bootstrap while connected to the `postgres`
 maintenance database as the PostgreSQL cluster administrator.
 
-OpenBSD example:
+Use the same explicit database-login workflow on OpenBSD and Linux:
 
 ```sh
 cd /path/to/authd
-doas -u _postgresql psql -W -U postgres -d postgres \
+psql -Upostgres -dpostgres -X -v ON_ERROR_STOP=1 \
   -v authd_database=authd \
   -v authd_owner_role=authd_owner \
   -v authd_runtime_role=authd_runtime \
   -f deploy/postgresql/create-database.sql
 ```
 
-Typical Linux peer-auth example:
-
-```sh
-cd /path/to/authd
-sudo -u postgres psql -d postgres \
-  -v authd_database=authd \
-  -v authd_owner_role=authd_owner \
-  -v authd_runtime_role=authd_runtime \
-  -f deploy/postgresql/create-database.sql
-```
+`-Upostgres` selects the PostgreSQL role, not the Unix account. These commands
+assume the cluster's local authentication policy permits that login from your
+administrative account. They do not require running psql as `_postgresql` and do
+not bypass `pg_hba.conf`. When the local socket uses peer authentication for a
+*different* Unix account, use the site's configured authenticated connection, for
+example add `-h127.0.0.1` for an already-configured loopback SCRAM admin connection.
+Do not change the cluster to `trust` just to make a command work. psql may still
+request the cluster administrator's login password according to that policy; a
+protected administrator pgpass file can supply it for batch use. See the
+[psql options][1] and [peer-authentication rules][2].
 
 The script:
 
@@ -138,18 +139,61 @@ The script:
 - revokes database `CONNECT` and `TEMPORARY` from PUBLIC;
 - grants database `CONNECT` only to the owner and runtime roles.
 
-It deliberately does **not** put passwords in SQL. Set both passwords using
-`psql`'s hidden interactive prompt. For example, enter psql as the cluster
-administrator and run:
+It does not set or rotate role passwords. Initial credential assignment is the
+explicit SQL step below; it is not repeated during ordinary upgrades.
 
-```text
-\password authd_owner
-\password authd_runtime
-\q
+### 3.1 Assign the two PostgreSQL role passwords with SQL
+
+Use distinct random values for the owner and runtime roles. Keep the real values
+out of the repository and command arguments. Prepare a private temporary SQL file
+outside the checkout:
+
+```sh
+password_sql=$(mktemp "$HOME/.authd-db-passwords.XXXXXXXX")
+chmod 0600 "$password_sql"
+vi "$password_sql"
 ```
 
-Use different random passwords. `authd_owner` is an administrative migration
-credential and MUST NOT be copied into `/etc/authd/authd.env`.
+Put the following in that file, replacing **both** placeholder strings before
+execution. Use the same role names chosen above. Double any single quote inside
+an SQL password literal; for example a literal apostrophe is written as `''`.
+
+```sql
+BEGIN;
+SET LOCAL standard_conforming_strings = on;
+SET LOCAL password_encryption = 'scram-sha-256';
+ALTER ROLE authd_owner WITH PASSWORD 'REPLACE_WITH_OWNER_PASSWORD';
+ALTER ROLE authd_runtime WITH PASSWORD 'REPLACE_WITH_RUNTIME_PASSWORD';
+COMMIT;
+```
+
+Load that file through the explicit cluster-administrator connection:
+
+```sh
+psql -Upostgres -dpostgres -X -v ON_ERROR_STOP=1 -f "$password_sql"
+```
+
+Stop on any error. Store the successful values securely for the owner pgpass in
+step 5 and runtime pgpass in step 8, then remove the temporary file and any editor
+backup/swap copies:
+
+```sh
+rm -f "$password_sql"
+unset password_sql
+```
+
+Using a file keeps the literal passwords out of shell command history, psql's
+interactive history and process arguments. It does **not** prevent PostgreSQL
+statement/audit logging, error reports or session capture from recording the SQL.
+Treat the file and any such output as secrets; use a local administrative socket
+or certificate-verified TLS and review the site's logging policy. SCRAM controls
+stored verifiers, not whether submitted SQL contains a password. See
+[psql file input][1] and the [ALTER ROLE security notes][3].
+
+The `authd_owner` credential is for migrations/grants only and MUST NOT be copied
+into `/etc/authd/authd.env` or `/etc/authd/pgpass`. The daemon gets only
+`authd_runtime`. An existing installation does not need new passwords just because
+this documentation changed.
 
 ## 4. Build and verify authd
 
@@ -210,7 +254,7 @@ database**, not the `postgres` maintenance database:
 
 ```sh
 PGPASSFILE="$HOME/.pgpass-authd-owner" \
-psql -h 127.0.0.1 -U authd_owner -d authd \
+psql -Uauthd_owner -dauthd -h127.0.0.1 -X -v ON_ERROR_STOP=1 \
   -v authd_schema=public \
   -v authd_runtime_role=authd_runtime \
   -f deploy/postgresql/runtime-grants.sql
@@ -370,7 +414,7 @@ doas -u _authd /bin/ksh -c '
 ```
 
 Linux/systemd environment file syntax is compatible with the checked-in sample;
-for a one-time bootstrap, invoke through a root shell that exports the file:
+for a one-time bootstrap, invoke a shell as `_authd` that exports the file:
 
 ```sh
 sudo -u _authd /bin/sh -c '
@@ -565,3 +609,25 @@ backup, not running an old binary on the newer schema. `CheckSchema` intentional
 refuses that mismatch. It checks migration names/versions, not physical DDL or
 migration-file checksums. Installer reruns preserve active deployment files; they
 do not provide automatic data rollback.
+
+
+## 16. v0.9.0 → v0.9.1 documentation-only update
+
+v0.9.1 records the externally reported v0.9.0 OpenBSD/PostgreSQL/live-OIDC pass and
+corrects the psql procedure above. Go runtime source, dependency locks, migrations
+001–005, SQL privilege statements, Makefile and native service definitions are
+unchanged. There is no new migration or credential-rotation step for this update.
+An already-running v0.9.0 daemon does not need a restart for these documentation
+changes; a fresh install follows the complete procedure above.
+
+The reported test pass covers the v0.9.0 PostgreSQL integration suite, greenfield
+role/database setup with owner migration/runtime bootstrap, and a live provider
+flow. It does not qualify a restored production database, the actual bdcmaps
+callback, HTTPS/proxying, native service installation, live MFA, or Linux race/
+systemd execution. Details and the verbatim report are in `VALIDATION.md`.
+
+## PostgreSQL command references
+
+[1]: https://www.postgresql.org/docs/current/app-psql.html
+[2]: https://www.postgresql.org/docs/current/auth-peer.html
+[3]: https://www.postgresql.org/docs/current/sql-alterrole.html

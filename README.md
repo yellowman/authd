@@ -7,6 +7,21 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
+## v0.9.1 — deployment instructions and qualification record
+
+This is a documentation-only follow-up to v0.9.0. PostgreSQL administration now
+uses `psql -Upostgres` with an explicit target database and a documented SQL
+password-assignment step. The source, dependencies, migrations, privilege SQL,
+Makefile and service definitions that the tester qualified are unchanged; no new
+migration, password reset or service restart is required for this update.
+
+A user-supplied report for v0.9.0 states that `make verify-openbsd`, fresh
+PostgreSQL database/role creation, owner migration, runtime grants/bootstrap and a
+live OIDC flow passed. The raw command logs were not supplied and this was not
+independently rerun here. See [`VALIDATION.md`](VALIDATION.md) for the report and
+what remains untested: actual bdcmaps, HTTPS/proxying, native services, live MFA and
+Linux race/systemd qualification, among the remaining release gates.
+
 ## v0.9.0 — OIDC protocol and grant-transaction audit
 
 This release fixes the authorization and token lifecycle, rather than merely
@@ -29,10 +44,11 @@ accepted at UserInfo; reauthorize/refresh as needed. Mandatory MFA requires clie
 policy or an essential `claims` selector, not `acr_values` alone. Offline access
 requires `prompt=consent`. Full procedure: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-The local stdlib-based regression/race/vet gate passes. The new SQL transaction
-and concurrency tests typecheck but **have not executed against PostgreSQL here**.
-The previous external OpenBSD/PG pass is historical evidence, not validation of
-this revision. No OpenID conformance certificate or production signoff is claimed.
+The original local stdlib-based regression/race/vet gate passed. The subsequent
+external v0.9.0 report also states that the real PostgreSQL integration gate and
+live provider flow passed. This is no longer limited to an earlier revision's
+external result; it remains reported test evidence, not an OpenID conformance
+certificate or production signoff.
 
 Local users, roles, permissions, password/TOTP/recovery, administrator CRUD,
 client registration, signing-key rotation, audit/session views, OpenBSD rc.d,
@@ -58,7 +74,7 @@ verifier; no recoverable primary password or NT hash is introduced for future AA
 ## Build and first use
 
 Use Go 1.26 or newer and PostgreSQL. `golang.org/x/crypto v0.57.0` requires Go 1.26.
-The dependency lockfile is committed. `make deps` runs `go mod tidy` and `go mod verify`; it should leave the module files clean:
+The dependency lockfile is committed. `make deps` runs `go mod download` and `go mod verify`; it should leave the module files clean:
 
 ```sh
 make deps
@@ -149,8 +165,9 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 
 ## Current limits
 
-- Real PostgreSQL/dependency-backed qualification has not run in this authoring
-  environment, and actual bdcmaps interoperability remains an external gate.
+- The real PostgreSQL/dependency-backed v0.9.0 gate and live OIDC flow passed
+  according to the external report, not an authoring-environment rerun. Actual
+  bdcmaps interoperability and production deployment checks remain external gates.
 - Normal online access uses registered-client policy; explicit browser-bound
   consent is implemented and required for offline access in this release.
 - Signing-key inventory and manual rotation are implemented; automatic rotation and
@@ -168,11 +185,12 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 
 ## Next qualification
 
-First execute the new migration/atomicity/concurrency PostgreSQL suite. Then
-exercise the actual `yellowman/bdcmaps` callback against authd and qualify the
-production-facing OpenBSD path: HTTPS/nginx/secure cookies/trusted proxy headers,
-runtime-role separation, and live TOTP step-up. Run the race suite on a supported
-Go platform and an independent OIDC interoperability/conformance suite before a
+Next exercise the actual `yellowman/bdcmaps` callback against authd and qualify
+the production-facing OpenBSD path: HTTPS/nginx/secure cookies/trusted proxy
+headers, native service installation and live TOTP step-up. The reported fresh
+owner/runtime setup passes; explicit negative-privilege tests and native-service
+credential handling still need evidence. Run the race suite on a supported Go
+platform and an independent OIDC interoperability/conformance suite before a
 production candidate. RADIUS remains PAP-first unless a concrete device forces
 explicit legacy credential support.
 

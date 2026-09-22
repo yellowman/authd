@@ -2,7 +2,7 @@
 
 -- Run this as the same PostgreSQL role that owns/applies authd migrations.
 -- The runtime LOGIN role must already exist. deploy/postgresql/create-database.sql
--- creates the default dedicated role; passwords are set interactively by the operator.
+-- creates the default dedicated role; DEPLOYMENT.md section 3.1 covers password assignment.
 --
 -- Override at invocation time when needed:
 --   psql -v authd_schema=authd -v authd_runtime_role=authd_runtime -f runtime-grants.sql

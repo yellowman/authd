@@ -1,0 +1,13 @@
+authd v0.9.1 documentation-only verification
+Date: 2026-09-22
+Base commit: b8d336dc4714a5ddc36bde292d8ce8462a09faae
+PASS: 94 runtime/source/test/dependency/migration/build/service/contract files byte-identical to v0.9.0
+PASS: both PostgreSQL helper SQL bodies unchanged; only comments/operator echo differ
+PASS: tracked change scope is documentation and SQL guidance only
+PASS: 28 documentation shell blocks parse with /bin/sh -n; not executed
+PASS: 19 local Markdown link destinations exist
+PASS: psql role/database targeting, explicit SQL password step and no legacy OS-user/\password recipe in current deployment instructions
+PASS: external v0.9.0 report retained with its positive and untested boundaries
+PASS: git diff --check
+NOT RUN HERE: PostgreSQL/psql, full production build, native OpenBSD/systemd, independent RP/conformance
+No production credentials, database or remote repository were accessed.

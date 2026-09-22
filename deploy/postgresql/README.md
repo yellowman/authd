@@ -4,7 +4,7 @@ The complete installation procedure is in [`../../DEPLOYMENT.md`](../../DEPLOYME
 
 This directory contains two different privilege stages:
 
-- `create-database.sql` runs as a PostgreSQL cluster administrator against the `postgres` maintenance database. It creates the dedicated authd database plus `authd_owner` and `authd_runtime` LOGIN roles, but deliberately sets no passwords. Use psql `\password` interactively afterwards.
+- `create-database.sql` runs as a PostgreSQL cluster administrator against the `postgres` maintenance database. It creates the dedicated authd database plus `authd_owner` and `authd_runtime` LOGIN roles, but deliberately sets no passwords. Invoke it with `psql -Upostgres -dpostgres -X -v ON_ERROR_STOP=1 -f deploy/postgresql/create-database.sql` from the source root. Use the private SQL-file `ALTER ROLE ... PASSWORD` procedure in DEPLOYMENT.md section 3.1 for initial password assignment; do not put passwords in checked-in SQL or process arguments.
 - `runtime-grants.sql` runs as `authd_owner` **against the authd database after `authd migrate`**. It grants the pre-existing `authd_runtime` role DML/sequence/schema usage, revokes schema CREATE from PUBLIC/runtime, and establishes matching default privileges for future migration-created objects.
 
 The resulting trust split is:

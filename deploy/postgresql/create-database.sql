@@ -4,9 +4,10 @@
 --
 -- Run this while connected to a maintenance database (normally `postgres`) as
 -- a PostgreSQL cluster administrator. The script creates dedicated LOGIN roles
--- and the authd database but deliberately does not set passwords. Set passwords
--- interactively afterwards with psql's \password command so credentials do not
--- appear in this file, shell history, or the process list.
+-- and the authd database but deliberately does not set or rotate passwords.
+-- Use psql -Upostgres -dpostgres -X -v ON_ERROR_STOP=1 -f <this-file>.
+-- DEPLOYMENT.md section 3.1 describes explicit ALTER ROLE password assignment
+-- from a private SQL file. Never commit passwords or put them in arguments.
 --
 -- Override defaults with psql -v when needed:
 --   -v authd_database=authd
@@ -53,5 +54,5 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'authd_database', :'authd_o
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'authd_database', :'authd_runtime_role')
 \gexec
 
-\echo 'authd database objects exist. Set LOGIN passwords interactively in psql for roles:' :authd_owner_role 'and' :authd_runtime_role
+\echo 'authd database objects exist. Follow DEPLOYMENT.md section 3.1 to assign initial passwords for:' :authd_owner_role 'and' :authd_runtime_role
 \echo 'Then run authd migrate with the owner role and runtime-grants.sql against the authd database.'

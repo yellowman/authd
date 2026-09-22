@@ -18,13 +18,20 @@ throwaway in-memory fixture values, not deployment credentials. Those tests now
 pass. Additional source findings have separate regressions and SQL integration
 witnesses; a unit fixture is not proof of PostgreSQL transaction behavior.
 
-The available environment executed 104 named top-level tests (102 in stdlib-only
-packages and two standalone password-encoding tests), race checks for those real
-components, vet, fuzzing, and CPU benchmarks. The new PostgreSQL tests typecheck
-but did not execute. Go 1.26+ dependencies, the full daemon, PostgreSQL, real
-bdcmaps and an independent OpenID conformance runner remain required gates.
-The earlier externally reported OpenBSD/PostgreSQL pass applies to the earlier
-revision only. Full boundary: [VALIDATION.md](../VALIDATION.md).
+At source-delivery time, the authoring environment executed 104 named top-level
+tests (102 in stdlib-only packages and two standalone password-encoding tests),
+race checks for those real components, vet, fuzzing, and CPU benchmarks. The new
+PostgreSQL tests were typechecked but not executed in that environment.
+
+**Subsequent external evidence, recorded with v0.9.1:** the user reports that
+v0.9.0 passed `make verify-openbsd`, including actual PostgreSQL integration;
+fresh database/role creation, owner migration and runtime grants/bootstrap; and a
+live consent/PKCE/client_secret_post/claims/UserInfo/refresh/code-replay flow.
+The [verbatim report](validation/v0.9.0/external-openbsd-report.md) contains the
+reported boundary. Raw execution logs were not supplied. Actual bdcmaps, HTTPS/
+proxy, native service installation, live MFA and Linux race/systemd execution
+remain open, as do independent conformance and restored-database/load testing.
+Full current record: [VALIDATION.md](../VALIDATION.md).
 
 ## Findings and implemented corrections
 
@@ -251,8 +258,11 @@ claiming deployment capacity.
 4. Exercise native rc.d/systemd installation and runtime-role separation, and
    perform a matched database/master-key restore drill.
 
-These gates remain open. The checked-in witness source is intended to make the
-next real database run informative, not to replace it.
+The externally reported v0.9.0 OpenBSD/database/live-provider pass closes the
+initial real-database execution gap. The Linux/race run, restored-database upgrade,
+actual BDC/conformance/proxy/MFA tests, native service operation, negative runtime
+privilege checks and restore drill above remain open. See VALIDATION.md rather
+than interpreting the original source-delivery limitations as the latest status.
 
 ## Primary protocol references
 

@@ -27,14 +27,15 @@ Before adding a dependency, document why the standard library or an existing dep
 Until a project-specific security mailbox is established, report issues privately to the repository owner rather than filing a public issue containing exploit details.
 
 
-## v0.9.0 operational status
+## v0.9.1 operational status (unchanged v0.9.0 runtime)
 
-OIDC issuance is implemented in source, but this is not yet a production-qualified
-identity service. Do not expose it to production traffic before completing the real
-dependency/PostgreSQL gates and an independent interoperability review described in
-VALIDATION.md. Local OIDC tests exercise real RSA/JWT/JWK/PKCE code with an in-memory
-store; they do not prove PostgreSQL behavior or protocol conformance. No module
-replacement counts as release evidence.
+A user-supplied v0.9.0 report states that the real OpenBSD build/tests/PostgreSQL
+gate, greenfield owner/runtime setup and a live OIDC provider flow passed. Raw logs
+were not supplied; this is not an independent authoring-environment rerun or a
+production approval. Actual RP interoperability, production HTTPS/proxy behavior,
+live MFA, service-manager operation, Linux race tests and the other gates in
+VALIDATION.md remain. Local in-memory tests alone do not establish SQL behavior or
+protocol conformance. No module replacement counts as release evidence.
 
 Keep master-key files owner-only. Use loopback-only development mode; production
 uses an HTTPS reverse proxy and authenticated PostgreSQL TLS. Forwarded IP headers
@@ -62,5 +63,6 @@ ambiguous responses remain a distributed-system uncertainty, not permission to
 accept replays. RPs must serialize refreshes. Failure to contact storage is not
 invalid credentials or a successful revoke/logout.
 
-See docs/OIDC_AUDIT.md for the fixes, migration 005 and unexecuted SQL witnesses.
-The new transaction implementation must pass the real database gate before use.
+See docs/OIDC_AUDIT.md for the fixes and migration 005. The external report now
+states that the v0.9.0 real database gate passed. Do not extend that report to
+untested production, load, failover, restored-database or conformance scenarios.
