@@ -4,10 +4,25 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
+// An operator may run tests from a shell with the installed service environment
+// loaded. Fixtures must not accidentally consume that listener, secret file or
+// duration policy, or a negative case can pass for the wrong reason.
+func clearConfigurationEnv(t *testing.T) {
+	t.Helper()
+	for _, field := range os.Environ() {
+		name, _, _ := strings.Cut(field, "=")
+		if name == "DATABASE_URL" || strings.HasPrefix(name, "AUTHD_") {
+			t.Setenv(name, "")
+		}
+	}
+}
+
 func TestLoadDevelopmentConfig(t *testing.T) {
+	clearConfigurationEnv(t)
 	t.Setenv("AUTHD_ISSUER", "http://127.0.0.1:8080/")
 	t.Setenv("AUTHD_DEVELOPMENT", "true")
 	t.Setenv("DATABASE_URL", "postgres://authd:authd@127.0.0.1/authd")
@@ -22,6 +37,7 @@ func TestLoadDevelopmentConfig(t *testing.T) {
 }
 
 func TestLoadRequiresHTTPSOutsideDevelopment(t *testing.T) {
+	clearConfigurationEnv(t)
 	t.Setenv("AUTHD_ISSUER", "http://auth.example.test")
 	t.Setenv("AUTHD_DEVELOPMENT", "false")
 	t.Setenv("DATABASE_URL", "postgres://example")
@@ -32,6 +48,7 @@ func TestLoadRequiresHTTPSOutsideDevelopment(t *testing.T) {
 }
 
 func TestConfigurationFailsClosed(t *testing.T) {
+	clearConfigurationEnv(t)
 	for _, c := range []struct{ name, key, value string }{
 		{"invalid_boolean", "AUTHD_DEVELOPMENT", "maybe"},
 		{"malformed_duration", "AUTHD_SESSION_IDLE_TTL", "twelve hours"},
@@ -88,6 +105,7 @@ func TestTrustedProxyConfiguration(t *testing.T) {
 }
 
 func TestMasterKeyFilePermissions(t *testing.T) {
+	clearConfigurationEnv(t)
 	path := filepath.Join(t.TempDir(), "master.key")
 	t.Setenv("AUTHD_MASTER_KEY", "")
 	t.Setenv("AUTHD_MASTER_KEY_FILE", path)

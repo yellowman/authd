@@ -8,7 +8,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 printf 'module github.com/yellowman/authd\n\ngo 1.23.0\n' > "$work/offline.mod"
 export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off
-packages="./internal/config ./internal/cryptoutil ./internal/identity ./internal/db ./internal/oidc ./internal/protocol ./internal/requestid ./internal/totp ./internal/web"
+packages="./internal/config ./internal/cryptoutil ./internal/identity ./internal/listener ./internal/db ./internal/oidc ./internal/protocol ./internal/requestid ./internal/totp ./internal/web"
 go test -race -count=1 -modfile="$work/offline.mod" $packages
 go vet -modfile="$work/offline.mod" $packages
 go test -race -count=1 -modfile="$work/offline.mod" internal/password/encoding.go internal/password/encoding_test.go

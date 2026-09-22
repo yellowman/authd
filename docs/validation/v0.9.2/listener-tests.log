@@ -1,0 +1,52 @@
+=== RUN   TestParseAddress
+--- PASS: TestParseAddress (0.00s)
+=== RUN   TestServeTCPAndGracefulShutdown
+--- PASS: TestServeTCPAndGracefulShutdown (0.04s)
+=== RUN   TestServeCancellationBeforeStart
+--- PASS: TestServeCancellationBeforeStart (0.00s)
+=== RUN   TestServeDeadlineClosesConnections
+--- PASS: TestServeDeadlineClosesConnections (0.02s)
+=== RUN   TestUnixHTTPModeAndCleanup
+--- PASS: TestUnixHTTPModeAndCleanup (0.00s)
+=== RUN   TestUnixConfiguredGroup
+--- PASS: TestUnixConfiguredGroup (0.00s)
+=== RUN   TestUnixRefusesInvalidModeAndGroup
+--- PASS: TestUnixRefusesInvalidModeAndGroup (0.00s)
+=== RUN   TestUnixRefusesNonSocketTargets
+=== RUN   TestUnixRefusesNonSocketTargets/file
+=== RUN   TestUnixRefusesNonSocketTargets/directory
+=== RUN   TestUnixRefusesNonSocketTargets/symlink
+--- PASS: TestUnixRefusesNonSocketTargets (0.00s)
+    --- PASS: TestUnixRefusesNonSocketTargets/file (0.00s)
+    --- PASS: TestUnixRefusesNonSocketTargets/directory (0.00s)
+    --- PASS: TestUnixRefusesNonSocketTargets/symlink (0.00s)
+=== RUN   TestUnixRefusesLiveUnmanagedSocket
+--- PASS: TestUnixRefusesLiveUnmanagedSocket (0.00s)
+=== RUN   TestUnixRecoversStaleSocket
+--- PASS: TestUnixRecoversStaleSocket (0.00s)
+=== RUN   TestUnixConcurrentStartsOnlyOneWins
+--- PASS: TestUnixConcurrentStartsOnlyOneWins (0.00s)
+=== RUN   TestUnixLockRefusesSymlinkHardlinkAndFIFO
+=== RUN   TestUnixLockRefusesSymlinkHardlinkAndFIFO/symlink
+=== RUN   TestUnixLockRefusesSymlinkHardlinkAndFIFO/hardlink
+=== RUN   TestUnixLockRefusesSymlinkHardlinkAndFIFO/fifo
+=== RUN   TestUnixLockRefusesSymlinkHardlinkAndFIFO/permissive_file
+--- PASS: TestUnixLockRefusesSymlinkHardlinkAndFIFO (0.00s)
+    --- PASS: TestUnixLockRefusesSymlinkHardlinkAndFIFO/symlink (0.00s)
+    --- PASS: TestUnixLockRefusesSymlinkHardlinkAndFIFO/hardlink (0.00s)
+    --- PASS: TestUnixLockRefusesSymlinkHardlinkAndFIFO/fifo (0.00s)
+    --- PASS: TestUnixLockRefusesSymlinkHardlinkAndFIFO/permissive_file (0.00s)
+=== RUN   TestUnixParentPolicy
+--- PASS: TestUnixParentPolicy (0.00s)
+=== RUN   TestUnixParentAlias
+--- PASS: TestUnixParentAlias (0.00s)
+=== RUN   TestUnixCloseDoesNotRemoveReplacement
+--- PASS: TestUnixCloseDoesNotRemoveReplacement (0.00s)
+=== RUN   TestUnixRejectsDifferentOwner
+--- PASS: TestUnixRejectsDifferentOwner (0.00s)
+=== RUN   TestUnixCrashRecovery
+--- PASS: TestUnixCrashRecovery (0.01s)
+=== RUN   TestUnixCrashChild
+--- PASS: TestUnixCrashChild (0.00s)
+PASS
+ok  	github.com/yellowman/authd/internal/listener	1.106s

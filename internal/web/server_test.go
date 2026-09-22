@@ -303,21 +303,21 @@ func TestTrustedProxyResolutionStopsAtNearestUntrustedHop(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "https://auth.example.test/", nil)
 	r.RemoteAddr = "127.0.0.1:44321"
 	r.Header.Set("X-Forwarded-For", "198.51.100.9, 203.0.113.44, 10.1.2.3")
-	if got := resolvedClientIP(r, trusted); got != "203.0.113.44" {
+	if got := resolvedClientIP(r, trusted, false); got != "203.0.113.44" {
 		t.Fatalf("client IP=%q want nearest untrusted hop", got)
 	}
 
 	// A directly untrusted peer never gets to nominate its own source address.
 	r.RemoteAddr = "192.0.2.30:44321"
 	r.Header.Set("X-Forwarded-For", "198.51.100.1")
-	if got := resolvedClientIP(r, trusted); got != "192.0.2.30" {
+	if got := resolvedClientIP(r, trusted, false); got != "192.0.2.30" {
 		t.Fatalf("untrusted peer spoofed source: %q", got)
 	}
 
 	// Malformed trusted-proxy chains fail closed to the direct peer.
 	r.RemoteAddr = "127.0.0.1:44321"
 	r.Header.Set("X-Forwarded-For", "198.51.100.1, garbage")
-	if got := resolvedClientIP(r, trusted); got != "127.0.0.1" {
+	if got := resolvedClientIP(r, trusted, false); got != "127.0.0.1" {
 		t.Fatalf("malformed chain partially trusted: %q", got)
 	}
 }

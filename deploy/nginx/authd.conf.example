@@ -1,0 +1,32 @@
+# Install deliberately after adapting hostname, certificate and socket paths.
+# This belongs inside nginx's http context, not an already-open server block.
+upstream authd_backend {
+    server unix:/run/authd/authd.sock;
+    keepalive 16;
+}
+
+server {
+    listen 443 ssl;
+    server_name auth.example.com;
+    ssl_certificate /etc/ssl/auth.example.com.fullchain.pem;
+    ssl_certificate_key /etc/ssl/private/auth.example.com.key;
+
+    # OIDC requests may carry tokens/state in query strings. Do not retain
+    # default access logs; also review the site's error-log capture/redaction.
+    access_log off;
+
+    location / {
+        proxy_pass http://authd_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        # Single edge proxy: replace browser-supplied forwarding information.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Forwarded "";
+        proxy_buffering off;
+        proxy_cache off;
+        # A retried token/refresh request can be a one-use credential replay.
+        proxy_next_upstream off;
+    }
+}

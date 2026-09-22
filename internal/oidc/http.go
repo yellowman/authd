@@ -555,15 +555,18 @@ func (h *HTTP) revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func auditFromRequest(r *http.Request) identity.Audit {
+	if ip, resolved := requestid.ClientIPValue(r.Context()); resolved {
+		return identity.Audit{IP: ip, RequestID: requestid.From(r.Context())}
+	}
+	if _, unixPeer := r.Context().Value(http.LocalAddrContextKey).(*net.UnixAddr); unixPeer {
+		return identity.Audit{RequestID: requestid.From(r.Context())}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	if net.ParseIP(host) == nil {
 		host = ""
-	}
-	if ip := requestid.ClientIP(r.Context()); ip != "" {
-		host = ip
 	}
 	return identity.Audit{IP: host, RequestID: requestid.From(r.Context())}
 }

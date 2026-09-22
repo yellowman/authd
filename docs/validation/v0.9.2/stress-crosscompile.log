@@ -1,0 +1,7 @@
+Linux/amd64 real component repeat/stress tests (no pgx/Argon2/PostgreSQL)
+ok  	github.com/yellowman/authd/internal/listener	3.949s
+ok  	github.com/yellowman/authd/internal/web	1.499s
+OpenBSD/amd64 CGO-disabled compile of real listener/config/web test executables; NOT EXECUTED
+/tmp/tmp.YwUQHP9f6A/listener-openbsd.test: ELF 64-bit LSB executable, x86-64, version 1 (OpenBSD), dynamically linked, interpreter /usr/libexec/ld.so, for OpenBSD, Go BuildID=A9id2K31ViGsZlKzYQu-/vjBColpvifTra5pQ1Jip/AXeZBSWDYcBfxMH5lFfY/orl5q8YvROE3j3lHxrYJ, with debug_info, not stripped
+/tmp/tmp.YwUQHP9f6A/config-openbsd.test: ELF 64-bit LSB executable, x86-64, version 1 (OpenBSD), dynamically linked, interpreter /usr/libexec/ld.so, for OpenBSD, Go BuildID=VVbx3yZGVvPt41-Q1uBT/fyZRNUhkGE6ckKmERtk8/zp-tPgn6X70LMehYr5HV/x-cmDWf6sC9JXRaHDdap, with debug_info, not stripped
+/tmp/tmp.YwUQHP9f6A/web-openbsd.test: ELF 64-bit LSB executable, x86-64, version 1 (OpenBSD), dynamically linked, interpreter /usr/libexec/ld.so, for OpenBSD, Go BuildID=ErwwKP7uz5eIt2165AY8/NjIeKcs6SOY2RrInda_h/S-AWrSMsLaOEj3ErqCaA/Dst43xMCe0W-Omip2iNt, with debug_info, not stripped

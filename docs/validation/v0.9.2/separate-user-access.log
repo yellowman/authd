@@ -1,0 +1,4 @@
+=== RUN   TestLinuxUnprivilegedSocketSharing
+--- PASS: TestLinuxUnprivilegedSocketSharing (1.05s)
+PASS
+ok  	github.com/yellowman/authd/internal/listener	2.068s

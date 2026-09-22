@@ -13,6 +13,7 @@ BINARY?=${BUILD_DIR}/authd
 DESTDIR?=
 PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
+LIBEXECDIR?=${PREFIX}/libexec
 SHAREDIR?=${PREFIX}/share/authd
 DOCDIR?=${PREFIX}/share/doc/authd
 SYSCONFDIR?=/etc
@@ -87,6 +88,7 @@ integration-openbsd:
 openbsd-deploy-check:
 	@ksh -n deploy/openbsd/rc.d/authd
 	@ksh -n .env.example
+	@sh -n deploy/openbsd/authd-run
 
 linux-deploy-check:
 	@command -v systemd-analyze >/dev/null 2>&1 || { echo "systemd-analyze required" >&2; exit 1; }
@@ -162,9 +164,15 @@ install-files:
 	@echo "==> installing authd binary and documentation"
 	@install -d -m 0755 "${DESTDIR}${BINDIR}" "${DESTDIR}${SHAREDIR}/postgresql" "${DESTDIR}${DOCDIR}"
 	@install -m 0755 "${BINARY}" "${DESTDIR}${BINDIR}/authd"
-	@install -m 0644 README.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md "${DESTDIR}${DOCDIR}/"
-	@install -m 0644 deploy/openbsd/README.md "${DESTDIR}${DOCDIR}/OPENBSD.md"
-	@install -m 0644 deploy/systemd/README.md "${DESTDIR}${DOCDIR}/LINUX.md"
+	@install -m 0644 README.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md ARCHITECTURE.md VALIDATION.md TODO.md CHANGELOG.md "${DESTDIR}${DOCDIR}/"
+	@install -d -m 0755 "${DESTDIR}${DOCDIR}/docs" "${DESTDIR}${SHAREDIR}/nginx"
+	@cp -R docs/. "${DESTDIR}${DOCDIR}/docs/"
+	@find "${DESTDIR}${DOCDIR}/docs" -type d -exec chmod 0755 {} \;
+	@find "${DESTDIR}${DOCDIR}/docs" -type f -exec chmod 0644 {} \;
+	@install -m 0644 deploy/nginx/authd.conf.example "${DESTDIR}${SHAREDIR}/nginx/"
+	@sed 's|../../DEPLOYMENT.md|DEPLOYMENT.md|g; s|../../docs/|docs/|g' deploy/openbsd/README.md > "${DESTDIR}${DOCDIR}/OPENBSD.md"
+	@sed 's|../../DEPLOYMENT.md|DEPLOYMENT.md|g; s|../../docs/|docs/|g' deploy/systemd/README.md > "${DESTDIR}${DOCDIR}/LINUX.md"
+	@chmod 0644 "${DESTDIR}${DOCDIR}/OPENBSD.md" "${DESTDIR}${DOCDIR}/LINUX.md"
 	@install -m 0644 deploy/postgresql/create-database.sql deploy/postgresql/runtime-grants.sql deploy/postgresql/README.md "${DESTDIR}${SHAREDIR}/postgresql/"
 
 install-config:
@@ -206,7 +214,8 @@ install-service:
 		install -m 0644 deploy/systemd/authd.service "${DESTDIR}${SYSTEMD_UNITDIR}/authd.service" ;; \
 	OpenBSD) \
 		echo "==> installing OpenBSD rc.d service"; \
-		install -d -m 0755 "${DESTDIR}${RCDIR}"; \
+		install -d -m 0755 "${DESTDIR}${RCDIR}" "${DESTDIR}${LIBEXECDIR}"; \
+		install -m 0555 deploy/openbsd/authd-run "${DESTDIR}${LIBEXECDIR}/authd-run"; \
 		install -m 0555 deploy/openbsd/rc.d/authd "${DESTDIR}${RCDIR}/authd" ;; \
 	*) echo "unsupported install host: $$os (supported: Linux, OpenBSD)" >&2; exit 1 ;; \
 	esac

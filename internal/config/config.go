@@ -12,16 +12,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yellowman/authd/internal/listener"
 )
 
 const defaultListen = "127.0.0.1:8080"
 
 type Config struct {
-	Issuer      string
-	Listen      string
-	DatabaseURL string
-	MasterKey   []byte
-	Development bool
+	Issuer          string
+	Listen          string
+	DatabaseURL     string
+	MasterKey       []byte
+	Development     bool
+	UnixSocketMode  os.FileMode
+	UnixSocketGroup string
+	TrustUnixProxy  bool
 
 	AccessTokenTTL       time.Duration
 	AuthorizationCodeTTL time.Duration
@@ -68,6 +73,22 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 	}
+	cfg.TrustUnixProxy, err = envBool("AUTHD_TRUST_UNIX_PROXY", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.UnixSocketMode = 0600
+	if raw := strings.TrimSpace(os.Getenv("AUTHD_UNIX_MODE")); raw != "" {
+		switch raw {
+		case "0600", "600":
+			cfg.UnixSocketMode = 0600
+		case "0660", "660":
+			cfg.UnixSocketMode = 0660
+		default:
+			return Config{}, errors.New("AUTHD_UNIX_MODE must be 0600 or 0660")
+		}
+	}
+	cfg.UnixSocketGroup = strings.TrimSpace(os.Getenv("AUTHD_UNIX_GROUP"))
 	if cfg.Listen == "" {
 		cfg.Listen = defaultListen
 	}
@@ -84,15 +105,26 @@ func Load() (Config, error) {
 	if !cfg.Development && issuer.Scheme != "https" {
 		return Config{}, errors.New("AUTHD_ISSUER must use https outside development mode")
 	}
-	host, port, listenErr := net.SplitHostPort(cfg.Listen)
-	if listenErr != nil || !validPort(port) {
-		return Config{}, errors.New("AUTHD_LISTEN must be host:port with a numeric port from 1 through 65535")
+	network, address, listenErr := listener.ParseAddress(cfg.Listen)
+	if listenErr != nil {
+		return Config{}, fmt.Errorf("AUTHD_LISTEN: %w", listenErr)
+	}
+	host := ""
+	if network == "tcp" {
+		var port string
+		host, port, _ = net.SplitHostPort(address)
+		if !validPort(port) {
+			return Config{}, errors.New("AUTHD_LISTEN must use a numeric port from 1 through 65535")
+		}
+		if cfg.TrustUnixProxy || cfg.UnixSocketGroup != "" || os.Getenv("AUTHD_UNIX_MODE") != "" {
+			return Config{}, errors.New("Unix socket options require a Unix AUTHD_LISTEN address")
+		}
 	}
 	if issuer.Port() != "" && !validPort(issuer.Port()) {
 		return Config{}, errors.New("AUTHD_ISSUER has an invalid port")
 	}
-	if cfg.Development && (!loopback(issuer.Hostname()) || !loopback(host)) {
-		return Config{}, errors.New("development mode requires a loopback issuer and loopback listener")
+	if cfg.Development && (!loopback(issuer.Hostname()) || (network == "tcp" && !loopback(host))) {
+		return Config{}, errors.New("development mode requires a loopback issuer and a loopback TCP or local Unix listener")
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")

@@ -66,3 +66,23 @@ invalid credentials or a successful revoke/logout.
 See docs/OIDC_AUDIT.md for the fixes and migration 005. The external report now
 states that the v0.9.0 real database gate passed. Do not extend that report to
 untested production, load, failover, restored-database or conformance scenarios.
+
+## Unix HTTP transport (v0.9.2)
+
+Unix support is not a reason to relax application authentication or public HTTPS.
+Only the daemon may mutate the socket parent; final `0600`/`0660` permissions are
+set before publication. Use a dedicated proxy group, not the private `_authd`
+group. A lifetime lock prevents competing authd listeners from unlinking one
+another. Foreign/non-socket/symlink paths and unprovably stale endpoints are
+refused. The socket is removed on graceful close only if it is still the same
+inode. Do not remove the `.lock` file while a listener may exist.
+
+`AUTHD_TRUST_UNIX_PROXY` is an explicit delegation of client-IP attribution to
+processes permitted to connect. It is off by default and does not trust TCP.
+It never grants user authentication or bypasses CSRF. Empty/malformed IP evidence
+remains unknown in rate limits and audit. There is no peer-UID authentication.
+
+See `docs/UNIX_SOCKET.md` for directory/chroot/service setup. New Linux listener,
+crash/concurrency and TLS-to-Unix handler tests are separate evidence from the
+reported v0.9.0 PostgreSQL pass. Full v0.9.2 build/native OpenBSD/actual nginx,
+service-manager operation and production RP testing still require qualification.

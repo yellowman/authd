@@ -160,3 +160,19 @@ PostgreSQL; existing local identity, domain and adapter ownership stays intact.
 ## Relying-party boundary
 
 Authd owns organizational human identity, local credentials, MFA, provider sessions and optional application-wide entitlements. Relying applications retain domain authority such as tenants, organizations, customers, PBXs, extensions, projects, rooms, cases and resource ownership. Durable RP identity is `(issuer, subject)` and provider-session correlation is `sid`; see `docs/RP_INTEGRATION.md`. Applications with customer-controlled IdPs may trust those providers directly rather than federating them through authd.
+
+## Native HTTP transport (v0.9.2)
+
+`internal/listener` owns TCP/Unix selection and HTTP shutdown. Unix publication
+uses a daemon-owned, non-shared-writable parent, a persistent-inode kernel lock,
+and a private staging socket with final permissions before rename. It rejects
+live/foreign/non-socket paths and only removes an owned, proven-stale socket.
+Closing a listener never removes another inode that replaced its public path.
+This is a local service transport, not another identity adapter or an RPC layer.
+
+`internal/web` resolves client IP once from the actual accepted transport plus
+explicit proxy trust. Unix peer names are never IPs. `internal/requestid`
+preserves the distinction between unknown IP and absent resolution so the OIDC
+layer cannot fall back to a socket filename for auditing. The public issuer,
+cookies and authorization remain unchanged. Native service setup owns directory
+provisioning and supplementary groups, not the Go process.

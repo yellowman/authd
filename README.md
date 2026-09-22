@@ -7,7 +7,30 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-## v0.9.1 — deployment instructions and qualification record
+## v0.9.2 — Unix-socket HTTP listener and native service wiring
+
+The HTTP server now supports `AUTHD_LISTEN='unix:/run/authd/authd.sock'` (or a
+bare absolute path) as well as the existing TCP address. This is real listener
+support, not a configuration alias for TCP. See [`docs/UNIX_SOCKET.md`](docs/UNIX_SOCKET.md)
+for socket mode/group, source-IP trust, Linux/OpenBSD runtime directories, nginx
+chroot paths and a staged cutover that does not repoint the proxy before the
+socket is ready. Public OIDC identity remains HTTPS.
+
+The socket defaults to owner-only `0600`. Use `0660` with a distinct `authd_proxy`
+group for a separate proxy worker; never give that worker the `_authd` secrets
+group. Forwarded IPs on Unix peers require `AUTHD_TRUST_UNIX_PROXY=true` and a
+proxy that overwrites incoming forwarding headers. Lifetime locking, restrictive
+publication, stale-path recovery and inode-safe cleanup are tested. OpenBSD now
+uses the normal rc.subr background/start path with an env-loading exec launcher;
+Linux gets a sandboxed `/run/authd` runtime directory.
+
+There is no new migration or dependency. Existing env/key/pgpass and TCP defaults
+are preserved. This runtime change needs a new binary and restart; the earlier
+v0.9.0 reported PostgreSQL pass does not qualify its native service behavior.
+The validation record distinguishes actual Linux socket/proxy tests from
+unexecuted full-build, PostgreSQL and native deployment gates.
+
+## Historical v0.9.1 — deployment instructions and qualification record
 
 This is a documentation-only follow-up to v0.9.0. PostgreSQL administration now
 uses `psql -Upostgres` with an explicit target database and a documented SQL
@@ -178,8 +201,8 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 - JWT access tokens intentionally remain valid until their short expiry after a
   user/session change; refresh and new authorization re-evaluate current grants.
 - Rate limits are process-local and deployments currently assume one active authd
-  instance. Forwarded IPs are honored only through the explicit trusted-proxy CIDR
-  configuration described above.
+  instance. TCP forwarded IPs require configured trusted-proxy CIDRs; Unix peers
+  require the separate explicit Unix-proxy trust option described in the socket guide.
 - OIDC conformance-suite and independent third-party client coverage remain
   qualification work; passing our protocol tests is not a conformance certificate.
 
@@ -198,6 +221,7 @@ explicit legacy credential support.
 
 ```text
 cmd/authd/            server and explicit bootstrap command
+internal/listener/    TCP/Unix HTTP transport, lifecycle and filesystem safety
 internal/identity/    identity service, contracts, validation, rate limits
 internal/password/    Argon2id verifier and bounded encoding parser
 internal/cryptoutil/  random tokens, hashes, CSRF MAC, authenticated encryption
@@ -207,7 +231,9 @@ internal/web/         provider-operated forms and security middleware
 internal/oidc/        OIDC/OAuth protocol, JWT/JWK, tokens, client administration
 internal/protocol/    future AAA adapter boundary
 deploy/postgresql/    greenfield database/role bootstrap + runtime grants
-deploy/openbsd/       rc.d service and pgpass example
+deploy/openbsd/       rc.d service, env-loading launcher and pgpass example
+deploy/systemd/       Linux unit and canonical environment example
+deploy/nginx/         HTTPS-to-Unix proxy example
 ```
 
 `SPEC.md` is the product contract. `TODO.md` distinguishes implemented source from

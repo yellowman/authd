@@ -355,44 +355,60 @@ func peerAddress(remote string) (netip.Addr, bool) {
 		host = remote
 	}
 	addr, err := netip.ParseAddr(strings.TrimSpace(host))
-	return addr, err == nil
+	return addr.Unmap(), err == nil && addr.Zone() == ""
 }
-func resolvedClientIP(r *http.Request, trusted []netip.Prefix) string {
-	peer, ok := peerAddress(r.RemoteAddr)
-	if !ok {
-		return ""
+func resolvedClientIP(r *http.Request, trusted []netip.Prefix, trustUnix bool) string {
+	// Transport comes from net/http's accepted connection, never request headers
+	// or a peer-controlled Unix filename that happens to resemble an IP address.
+	_, unixPeer := r.Context().Value(http.LocalAddrContextKey).(*net.UnixAddr)
+	fallback := ""
+	var peer netip.Addr
+	if unixPeer {
+		if !trustUnix {
+			return ""
+		}
+	} else {
+		var ok bool
+		peer, ok = peerAddress(r.RemoteAddr)
+		if !ok {
+			return ""
+		}
+		fallback = peer.String()
+		if !trustedAddress(peer, trusted) {
+			return fallback
+		}
 	}
-	if len(trusted) == 0 || !trustedAddress(peer, trusted) {
-		return peer.String()
+	fields := r.Header.Values("X-Forwarded-For")
+	if len(fields) != 1 || len(fields[0]) > 2048 {
+		return fallback
 	}
-	raw := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
-	if raw == "" {
-		return peer.String()
-	}
-	parts := strings.Split(raw, ",")
+	parts := strings.Split(fields[0], ",")
 	if len(parts) > 32 {
-		return peer.String()
+		return fallback
 	}
 	chain := make([]netip.Addr, 0, len(parts))
 	for _, part := range parts {
 		addr, err := netip.ParseAddr(strings.TrimSpace(part))
-		if err != nil {
-			// A malformed chain is not partially trusted. Falling back to the
-			// direct peer prevents attacker-controlled ambiguity from entering
-			// rate-limit or audit keys.
-			return peer.String()
+		if err != nil || addr.Zone() != "" {
+			return fallback
 		}
-		chain = append(chain, addr)
+		chain = append(chain, addr.Unmap())
 	}
 	candidate := peer
-	for i := len(chain) - 1; i >= 0 && trustedAddress(candidate, trusted); i-- {
+	last := len(chain) - 1
+	if unixPeer {
+		// The filesystem access policy and explicit flag trust this one hop only.
+		candidate = chain[last]
+		last--
+	}
+	for i := last; i >= 0 && trustedAddress(candidate, trusted); i-- {
 		candidate = chain[i]
 	}
 	return candidate.String()
 }
 func (s *Server) clientAddress(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := resolvedClientIP(r, s.cfg.TrustedProxies)
+		ip := resolvedClientIP(r, s.cfg.TrustedProxies, s.cfg.TrustUnixProxy)
 		next.ServeHTTP(w, r.WithContext(requestid.WithClientIP(context.WithValue(r.Context(), clientIPContextKey{}, ip), ip)))
 	})
 }

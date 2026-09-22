@@ -1,0 +1,11 @@
+#!/bin/sh
+# Executed by rc.subr as _authd. Keep configuration across its privilege change.
+set -eu
+if [ "$#" -ne 0 ]; then
+	echo "authd service takes no flags; configure /etc/authd/authd.env" >&2
+	exit 1
+fi
+set -a
+. /etc/authd/authd.env
+set +a
+exec /usr/local/bin/authd

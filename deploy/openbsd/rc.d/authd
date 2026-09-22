@@ -1,49 +1,83 @@
 #!/bin/ksh
-#
-# OpenBSD rc.d service for authd.
-#
-# The service environment is loaded from a root-controlled file rather than
-# encoded in rcctl flags. This carries DATABASE_URL and authd configuration
-# across rcctl start/restart while keeping secrets out of rc.conf.local.
-
-daemon="/usr/local/bin/authd"
+# authd runs in the foreground. Keep rc.subr's standard background/start/wait
+# machinery; the small launcher sources the environment *after* su to _authd.
+daemon="/usr/local/libexec/authd-run"
 daemon_user="_authd"
+daemon_execdir="/var/authd"
 authd_env_file="/etc/authd/authd.env"
-pexp="/usr/local/bin/authd.*"
 
 . /etc/rc.d/rc.subr
 
+rc_bg=YES
 rc_reload=NO
+# Override after rc.subr. Never match the administrative bootstrap/migrate CLI.
+pexp="^/usr/local/bin/authd$"
 
-rc_start() {
+rc_pre() {
 	if [[ ! -r "${authd_env_file}" ]]; then
 		echo "${authd_env_file} is required" >&2
 		return 1
 	fi
-
-	# Validate the environment before asking rc.subr to drop privileges. set -a
-	# makes every assignment exported, matching the execution shell below.
 	set -a
 	. "${authd_env_file}" || return 1
 	set +a
-
 	if [[ -z "${DATABASE_URL}" || -z "${AUTHD_ISSUER}" ]]; then
-		echo "DATABASE_URL and AUTHD_ISSUER are required in ${authd_env_file}" >&2
+		echo "DATABASE_URL and AUTHD_ISSUER are required" >&2
 		return 1
 	fi
 	if [[ -z "${AUTHD_MASTER_KEY_FILE}" && -z "${AUTHD_MASTER_KEY}" ]]; then
-		echo "AUTHD_MASTER_KEY_FILE or AUTHD_MASTER_KEY is required in ${authd_env_file}" >&2
-		return 1
-	fi
-	if [[ -n "${PGPASSFILE}" && ! -r "${PGPASSFILE}" ]]; then
-		echo "PGPASSFILE ${PGPASSFILE} is not readable" >&2
+		echo "AUTHD_MASTER_KEY_FILE or AUTHD_MASTER_KEY is required" >&2
 		return 1
 	fi
 
-	# rc_exec applies daemon_user. Source the environment again in that shell so
-	# variables are present after the privilege transition; this intentionally
-	# follows the WaveControl rc.d convention.
-	rc_exec "set -a; . \"${authd_env_file}\"; set +a; exec ${daemon} ${daemon_flags}"
+	case "${AUTHD_LISTEN}" in
+	unix:*) socket_path="${AUTHD_LISTEN#unix:}" ;;
+	/*) socket_path="${AUTHD_LISTEN}" ;;
+	*) return 0 ;; # Existing TCP configuration needs no filesystem listener.
+	esac
+	case "${socket_path}" in
+	/*) ;;
+	*) echo "Unix listener requires an absolute path" >&2; return 1 ;;
+	esac
+	case "${socket_path}" in
+	*'/../'*|*'/./'*|*'//'*|*/)
+		echo "Unix listener requires a clean socket path" >&2; return 1 ;;
+	esac
+	socket_dir="${socket_path%/*}"
+	if [[ -z "${socket_dir}" || "${socket_dir}" = / || -L "${socket_dir}" ]]; then
+		echo "Use a dedicated real directory for the Unix socket" >&2
+		return 1
+	fi
+	uid=$(id -u "${daemon_user}") || return 1
+	if [[ ! -e "${socket_dir}" ]]; then
+		# Auto-create only the standard runtime paths beneath root-controlled
+		# parents. Custom paths must be explicitly provisioned by the operator.
+		case "${socket_dir}" in
+		/var/run/authd|/run/authd|/var/www/run/authd) ;;
+		*) echo "Provision custom socket directory ${socket_dir} before start" >&2; return 1 ;;
+		esac
+		parent="${socket_dir%/*}"
+		[[ -n "${parent}" ]] || parent=/
+		[[ -d "${parent}" ]] || { echo "Socket parent ${parent} must exist" >&2; return 1; }
+		owner=$(stat -Lf '%u' "${parent}") || return 1
+		mode=$(stat -Lf '%OLp' "${parent}") || return 1
+		if [[ "${owner}" != 0 ]] || [ "$((0${mode} & 0022))" -ne 0 ]; then
+			echo "Create the socket directory under a root-controlled parent" >&2
+			return 1
+		fi
+		mkdir -m 0711 "${socket_dir}" || return 1
+		chown "${daemon_user}:$(id -gn "${daemon_user}")" "${socket_dir}" || return 1
+	fi
+	[[ -d "${socket_dir}" ]] || return 1
+	owner=$(stat -f '%u' "${socket_dir}") || return 1
+	mode=$(stat -f '%OLp' "${socket_dir}") || return 1
+	if [[ "${owner}" != "${uid}" ]] || [ "$((0${mode} & 0022))" -ne 0 ]; then
+		echo "${socket_dir} must be daemon-owned and not group/world writable" >&2
+		return 1
+	fi
+	# Socket and lifetime lock ownership/cleanup belong to Go, not rc.d. Never
+	# rm an existing socket here: another process may still be serving it.
+	return 0
 }
 
 rc_cmd $1

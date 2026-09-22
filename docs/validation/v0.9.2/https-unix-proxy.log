@@ -1,0 +1,10 @@
+=== RUN   TestHTTPSProxyToUnixLoginCookiesAndIdentity
+2026/09/22 17:55:28 INFO request id=UCH1avC8jv_Rmui6E33SsQ method=GET duration_ms=0
+2026/09/22 17:55:28 INFO request id=NH0XhpSWvF2NRBil1W99fw method=GET duration_ms=0
+2026/09/22 17:55:28 INFO request id=ibz0V-oBZsYx5X_VZBf7vg method=GET duration_ms=0
+2026/09/22 17:55:28 INFO request id=kg2BW12bHiONlfZLicLHWw method=POST duration_ms=0
+2026/09/22 17:55:28 INFO request id=zpTh6Z01W2P-xmOaQMjeZg method=GET duration_ms=1
+2026/09/22 17:55:28 INFO request id=Uv37TCUcO82nUh3M44uong method=POST duration_ms=0
+--- PASS: TestHTTPSProxyToUnixLoginCookiesAndIdentity (0.04s)
+PASS
+ok  	github.com/yellowman/authd/internal/web	1.055s

@@ -1,6 +1,6 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.9.0
+## Specification v0.9.2
 
 Status: binding product design; implementation corrected by the v0.9.0 protocol, transaction, and performance audit. See `docs/OIDC_AUDIT.md` and `VALIDATION.md`. This is not an OpenID certification or production signoff.
 
@@ -1689,7 +1689,22 @@ Production issuer URLs use HTTPS.
 
 The issuer is configured explicitly and is never inferred blindly from arbitrary `Host` or `X-Forwarded-*` headers.
 
-Forwarded headers are trusted only from explicitly configured reverse-proxy CIDR prefixes. If the direct peer is not trusted, `X-Forwarded-For` is ignored. For a trusted chain, authd walks addresses from the direct peer toward the client and uses the nearest untrusted address. Malformed or oversized chains fail closed to the direct peer address.
+For TCP, forwarded addresses are trusted only from explicitly configured
+reverse-proxy CIDR prefixes. If the direct peer is not trusted, `X-Forwarded-For`
+is ignored. For a trusted chain, authd walks addresses from the direct peer toward
+the client and uses the nearest untrusted address. Malformed, duplicate or
+oversized chains fall back to the direct TCP peer.
+
+Unix connections have no client IP; peer socket names MUST NOT be interpreted as
+IP addresses. Forwarded addresses on Unix connections are ignored unless
+`AUTHD_TRUST_UNIX_PROXY=true`. That explicit option trusts the filesystem-restricted
+Unix hop, not every TCP peer. Transport identity MUST come from the actual accepted
+connection, never an HTTP header or a peer-selected name. Invalid/missing forwarded
+chains remain unknown/empty, including in OIDC audit events, and use the shared
+unknown-IP rate-limit bucket. The proxy MUST overwrite browser-supplied forwarding
+headers. Additional proxy CIDRs may describe upstream TCP hops but MUST NOT
+implicitly trust Unix peers. This trust conveys source-IP attribution only, never
+an authenticated user or an authorization grant.
 
 Recommended security headers:
 
@@ -1907,6 +1922,9 @@ Initial environment/configuration surface:
 ```text
 AUTHD_ISSUER
 AUTHD_LISTEN
+AUTHD_UNIX_MODE
+AUTHD_UNIX_GROUP
+AUTHD_TRUST_UNIX_PROXY
 DATABASE_URL
 AUTHD_MASTER_KEY_FILE or AUTHD_MASTER_KEY
 AUTHD_DEVELOPMENT
@@ -1920,6 +1938,52 @@ Users, roles, permissions, and clients do not live in configuration files.
 They live in PostgreSQL and are edited through the web administration interface.
 
 Secrets should be supplied through protected files or narrowly scoped environment variables only when the secret cannot itself be managed through encrypted application storage.
+
+## 37.1 Native HTTP listener contract
+
+`AUTHD_LISTEN` selects exactly one HTTP transport. Existing TCP `host:port`
+configuration remains supported and remains the default. `unix:/absolute/path`
+and bare absolute socket paths select filesystem Unix stream sockets on Linux
+and OpenBSD. Relative, abstract, non-clean and overlong paths MUST fail validation.
+`unix://` URL syntax is not supported. Binding failure MUST stop the service;
+there is no automatic TCP fallback.
+
+The issuer and advertised OIDC endpoints MUST remain the configured public HTTPS
+origin regardless of listener transport. Production cookie, CSRF, Origin, token,
+client and issuer checks are not relaxed for an internal Unix connection.
+
+The Unix parent directory MUST already exist, be owned by the daemon, and not be
+group/world writable. Its ancestors must be controlled by root/the daemon.
+Native service definitions MAY provision an explicitly supported dedicated runtime
+directory. Go listener code MUST NOT recursively create directories, change
+service-account groups, or repair arbitrary directory ownership.
+
+`AUTHD_UNIX_MODE` defaults to `0600`; only `0600` and `0660` are accepted.
+`AUTHD_UNIX_GROUP` optionally selects the socket's group. The daemon must have
+permission to set that group; failures MUST NOT fall back to a weaker mode.
+Reverse proxies SHOULD use a distinct socket-sharing group, not `_authd`, which
+also governs access to private runtime configuration. The parent is normally
+`_authd:_authd 0711`; it permits traversal while socket mode gates connections.
+
+Startup MUST serialize publication with a lifetime filesystem lock, reject live
+listeners, and refuse to overwrite non-sockets, symlinks or foreign-owned sockets.
+Only an owned socket with an `ECONNREFUSED` connection probe may be removed as
+stale. Permission failures, timeouts and unknown errors are not evidence of
+staleness. Final mode/group MUST be applied in a private staging directory before
+publication; no process-wide umask change or permissive public bind window.
+
+Graceful shutdown removes only the listener's own recorded socket inode and drains
+HTTP requests with a bounded deadline. A replacement path must be left untouched.
+The owned mode-0600 `.lock` file is deliberately retained; the kernel releases its
+lock on close/process death. Service scripts MUST NOT unlink sockets or lock files
+to bypass a live instance. Linux systemd grants only the dedicated runtime write
+path under its existing sandbox; OpenBSD uses standard rc.subr background/start
+handling and sources the env after changing to the daemon user.
+
+Unix socket activation, peer-UID authentication, network-filesystem socket state,
+and multi-instance service coordination are not implemented. The operator path,
+proxy namespace/chroot rules and cutover procedure are in `docs/UNIX_SOCKET.md`.
+No database migration is introduced by v0.9.2.
 
 ---
 

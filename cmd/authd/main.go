@@ -17,6 +17,7 @@ import (
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/db"
 	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/listener"
 	"github.com/yellowman/authd/internal/oidc"
 	"github.com/yellowman/authd/internal/password"
 	webserver "github.com/yellowman/authd/internal/web"
@@ -141,21 +142,10 @@ func run() error {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("authd listening", "listen", cfg.Listen, "issuer", cfg.Issuer)
-		errCh <- httpServer.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return httpServer.Shutdown(shutdownCtx)
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
+	ln, err := listener.Open(listener.Options{Address: cfg.Listen, UnixMode: cfg.UnixSocketMode, UnixGroup: cfg.UnixSocketGroup})
+	if err != nil {
+		return fmt.Errorf("open HTTP listener: %w", err)
 	}
+	slog.Info("authd listening", "network", ln.Addr().Network(), "listen", ln.Addr().String(), "issuer", cfg.Issuer)
+	return listener.Serve(ctx, httpServer, ln, 10*time.Second)
 }

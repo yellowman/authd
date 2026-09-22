@@ -14,9 +14,17 @@ Restart=on-failure
 RestartSec=5
 UMask=0077
 
+# A dedicated writable runtime path under ProtectSystem=strict. 0711 grants
+# traversal, not listing/write access; the socket's 0600/0660 mode gates connect.
+RuntimeDirectory=authd
+RuntimeDirectoryMode=0711
+RuntimeDirectoryPreserve=yes
+ReadWritePaths=/run/authd
+TimeoutStopSec=15s
+
 # authd requires network access and read access to its root-managed runtime
-# configuration. Durable state lives in PostgreSQL; the daemon does not need
-# write access to /etc, /usr, or its working directory.
+# configuration. Durable state lives in PostgreSQL; only /run/authd is writable
+# for the optional Unix listener. /etc, /usr and its working directory stay read-only.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

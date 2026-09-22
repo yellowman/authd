@@ -1,0 +1,10 @@
+Authoring environment (not native deployment evidence):
+Linux x86_64
+go version go1.23.2 linux/amd64
+/usr/bin/systemd-analyze
+Production module / toolchain attempt (expected unavailable here):
+go: downloading go1.26.0 (linux/amd64)
+go: download go1.26.0: golang.org/toolchain@v0.0.1-go1.26.0.linux-amd64: Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.26.0.linux-amd64.zip": dial tcp: lookup proxy.golang.org on 168.63.129.16:53: read udp 172.26.39.224:35402->168.63.129.16:53: read: connection refused
+Production toolchain unavailable; no production-module build/run claimed.
+Source whitespace and formatting:
+PASS

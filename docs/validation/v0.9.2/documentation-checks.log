@@ -1,0 +1,2 @@
+PASS 38 local Markdown links; 36 shell blocks
+PASS formatting, env parity, whitespace and static systemd validation

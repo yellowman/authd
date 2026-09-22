@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.2 — Unix-socket HTTP and service lifecycle (2026-09-22)
+
+Added real TCP/Unix listener selection, owner-only/group-restricted socket modes,
+explicit group selection, safe private publication, persistent-inode lifetime
+locking, crash recovery and inode-checked shutdown. Existing TCP configuration
+remains valid; Unix binding failures never fall back to TCP. Public issuer and
+cookie security remain independent of transport.
+
+Unix proxy trust is an explicit option. Peer socket filenames cannot become
+client IPs, and unknown source addresses remain unknown through OIDC auditing.
+Added a real TLS-to-Unix reverse-proxy fixture exercising discovery, secure login
+cookies and CSRF, plus real socket, concurrent-start and killed-process tests.
+
+OpenBSD uses normal rc.subr background/start checks with a post-su env-loading
+launcher; Linux provisions a narrow writable runtime directory under the existing
+sandbox. Added nginx/chroot/group/cutover documentation. No new external dependency
+or SQL migration; native service/full-build qualification remains required.
+
 ## v0.9.1 — 2026-09-22
 
 Documentation/qualification update only; no runtime, dependency, migration,

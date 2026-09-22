@@ -1,36 +1,48 @@
 # OpenBSD deployment assets
 
 The complete procedure is in [`../../DEPLOYMENT.md`](../../DEPLOYMENT.md).
-
-Files in this directory:
+Unix-socket mode, the separate proxy group and chroot path mapping are in
+[`../../docs/UNIX_SOCKET.md`](../../docs/UNIX_SOCKET.md).
 
 ```text
 rc.d/authd       native OpenBSD service wrapper
-pgpass.example   PostgreSQL runtime-password file format
+authd-run        post-su environment loader; execs the foreground Go server
+pgpass.example  PostgreSQL runtime-password file format
 ```
 
-The service deliberately follows the WaveControl rc.d environment pattern:
-`/etc/authd/authd.env` is sourced with `set -a` both while validating the
-service configuration and again inside `rc_exec`, after `rc.subr` applies
-`daemon_user=_authd`. This means ordinary process-environment configuration is
-available to authd without putting secrets in `authd_flags` or
-`/etc/rc.conf.local`.
+`rc.subr` performs its normal start/background/check handling with `rc_bg=YES`.
+`rc_pre` validates the env and, for supported Unix paths, creates a dedicated
+runtime directory under an existing controlled parent. The installed
+`/usr/local/libexec/authd-run` sources `/etc/authd/authd.env` with `set -a` after
+`daemon_user=_authd` is applied, then execs the binary. Environment survives the
+privilege transition without secrets in `authd_flags` or `/etc/rc.conf.local`.
+The final process expression is set after rc.subr and does not match concurrent
+bootstrap or migration commands.
 
-Expected installed permissions:
+The standard Unix path is `/var/run/authd/authd.sock`. `/run/authd` and
+`/var/www/run/authd` are also supported when their root-controlled parents already
+exist; custom paths require explicit provisioning. The directory is daemon-owned,
+normally `0711`, and is never group/world writable. Go owns the socket and its
+lifetime lock; rc.d never removes either as a startup shortcut.
+
+Expected private runtime permissions stay unchanged:
 
 ```text
-/etc/authd                  root:_authd   0750
-/etc/authd/authd.env        root:_authd   0640
-/etc/authd/master.key       _authd:_authd 0400
-/etc/authd/pgpass           _authd:_authd 0400
-/etc/rc.d/authd             root:wheel    0555
-/usr/local/bin/authd        root:bin      0755
+/etc/authd                      root:_authd   0750
+/etc/authd/authd.env             root:_authd   0640
+/etc/authd/master.key            _authd:_authd 0400
+/etc/authd/pgpass                _authd:_authd 0400
+/etc/rc.d/authd                 root          0555
+/usr/local/libexec/authd-run    root          0555
+/usr/local/bin/authd            root          0755
 ```
 
-`make install-openbsd` is safe to run for both first installation and normal
-binary/service upgrades. On first install it creates a missing active env file and
-master key. On later installs it preserves the existing env, master key, and
-pgpass contents while replacing the binary, examples, documentation, and rc.d
-script. Database migration remains an explicit `authd migrate` step with the
-migration-owner credential. It does **not** create `/etc/authd/pgpass`; the
-operator must populate that file with the real `authd_runtime` password.
+Socket-sharing uses a separate `authd_proxy` group; the proxy must not become a
+member of the private `_authd` group. See the socket guide for exact commands.
+
+`make install-openbsd` is repeatable. It preserves active env, master key and
+pgpass while replacing binary, docs, examples, launcher and rc.d assets.
+It creates no runtime pgpass password and does not migrate the database.
+`authd migrate` remains a separate owner-credential step. v0.9.2 adds no migration.
+Native rcctl start/check/restart/stop still require actual OpenBSD qualification;
+shell syntax checks and cross-compilation are not proof of native service use.

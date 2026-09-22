@@ -1,4 +1,58 @@
-# Validation record — v0.9.1 documentation / v0.9.0 runtime
+# Validation record — v0.9.2 Unix transport
+
+Base: `59950b1` (delivered v0.9.1). This tranche changes the native HTTP listener,
+proxy source-IP resolution, service definitions and deployment documentation. It
+adds no external dependency or PostgreSQL migration. The previous user-supplied
+v0.9.0 OpenBSD/PostgreSQL/live-OIDC report is preserved below as historical
+positive evidence, not claimed as validation of the new Unix transport.
+
+## Executed for v0.9.2
+
+Authoring environment: Linux/amd64, Go 1.23.2. The production module still requires
+Go 1.26.0; its download was attempted and failed on DNS/network access. No
+substitute pgx/Argon2 modules or fake production executable were used.
+
+| Check | Result / evidence boundary |
+|---|---|
+| Regression against v0.9.1 | Unix address loading and Unix peer-name/IP confusion failed as expected; [before-fixes log](docs/validation/v0.9.2/before-fixes.log) |
+| Actual TCP and filesystem Unix listeners | PASS: requests, mode/group, lifetime lock, simultaneous starts, live/stale sockets, non-socket/symlink/foreign-owner refusal, parent alias, replacement-safe close, real SIGKILL recovery; [initial listener log](docs/validation/v0.9.2/listener-tests.log) |
+| Separate unprivileged daemon and proxy UIDs | PASS on Linux: daemon UID 65533 binds with supplementary socket GID 65532; proxy UID 65534 denied without that group, allowed with it. No system accounts created; [access witness](docs/validation/v0.9.2/separate-user-access.log) |
+| HTTPS → actual reverse proxy → filesystem Unix → real web handlers | PASS: public discovery issuer, login/CSRF, Secure/HttpOnly/host-only cookie attributes, correct source IP despite hostile incoming headers, cross-origin logout refusal; [proxy log](docs/validation/v0.9.2/https-unix-proxy.log). Identity store and KDF are fixtures; this is not nginx/PostgreSQL/full OIDC deployment. |
+| Repetition / concurrency | PASS: listener lifecycle suite repeated 30 times and Unix/proxy web tests 10 times under race detector; [stress log](docs/validation/v0.9.2/stress-crosscompile.log). The separate-UID witness was added afterward and run independently plus in the final gate. |
+| Available stdlib component race tests, vet, password parser, SQL-body typecheck | PASS: [final offline gate](docs/validation/v0.9.2/final-offline-gate.log). SQL bodies compile but are not executed; no pgx/Argon2/full-executable claim. |
+| Configuration tests under a hostile inherited service environment | PASS: invalid inherited Unix options, TTL and key-file settings cannot contaminate test fixtures or make a negative test pass for the wrong reason. [Environment isolation](docs/validation/v0.9.2/hostile-test-environment.log) |
+| OpenBSD/amd64 compile | PASS: CGO-disabled real listener/config/web test executables cross-compiled. NOT executed on OpenBSD; not the complete authd binary. [Cross-compile log](docs/validation/v0.9.2/stress-crosscompile.log) |
+| OpenBSD launcher environment/exec | PASS: real launcher exercised from an empty environment with installed paths redirected to temporary env/executable fixtures. Missing env and administrative flags refuse. This does not simulate native rc.subr/su. Included in final component gate. |
+| Package staging, Linux and OpenBSD | PASS: correct unit/rc.d/launcher/docs/nginx assets, no active env/key/pgpass/accounts/runtime directories. `/bin/true` is an explicitly labeled packaging fixture, not authd. [Staging/static log](docs/validation/v0.9.2/staging-static.log) |
+| Static deployment checks | PASS: env parity, formatting, shell syntax, static systemd verification with executable/env path substitutions. Native ksh and nginx are unavailable; their service/config execution is NOT claimed. |
+| Dependency/database invariance | PASS: all 19 dependency/database files, including migrations 001–005, are byte-identical to v0.9.1. [Hashes](docs/validation/v0.9.2/unchanged-sql-dependencies.log) |
+
+The stdlib tests exercise real RSA/PKCE/JWT code where existing protocol tests use
+it. The new HTTPS/Unix fixture proves transport and browser boundary behavior,
+not a new independent RP/conformance run. Root-only ownership and separate-UID
+witnesses actually ran here; ordinary unprivileged test runs label them skipped.
+No host services were installed or reconfigured and no production data was used.
+
+## Required native follow-up
+
+Run `make verify-openbsd` with the supported toolchain/dependencies and real
+PostgreSQL. Exercise actual rcctl start/check/restart/stop and crash restart, the
+actual proxy worker's supplementary groups, chroot path visibility when relevant,
+and real HTTPS login/BDCMAPS callback. Linux still needs full `make verify-linux`
+and actual systemd startup/sandbox/credential handling. The native OpenBSD wrapper
+and systemd unit have source/static evidence, not executed service-manager evidence.
+
+Before cutover, verify the new binary's Unix listener without replacing the live
+proxy upstream. No schema migration, rebootstrap or key/credential rotation is
+needed from v0.9.0/v0.9.1. Native installs preserve active configuration; configure
+the new Unix fields explicitly. The public issuer and HTTPS enforcement do not
+change. See [Unix-socket deployment](docs/UNIX_SOCKET.md).
+
+[Environment and toolchain refusal](docs/validation/v0.9.2/environment.log).
+
+---
+
+# Historical record — v0.9.1 documentation / v0.9.0 runtime
 
 This is test evidence, not a production approval or OpenID certification. The
 v0.9.0 audit base was `db7cae8` (v0.8.4); its delivered revision was `b8d336d`.

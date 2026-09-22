@@ -1,0 +1,24 @@
+Staged packaging tests use /bin/true as an executable fixture, NOT an authd build.
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing systemd service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+PASS Linux: correct socket/launcher/docs/service assets; no active env/key/pgpass/runtime directories.
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing OpenBSD rc.d service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+PASS OpenBSD: correct socket/launcher/docs/service assets; no active env/key/pgpass/runtime directories.
+Environment parity / formatting / static systemd validation:
+PASS (systemd ExecStart/env paths substituted by source-tree validation target; not service startup)
+PASS sh/bash syntax; native OpenBSD ksh unavailable and NOT EXECUTED

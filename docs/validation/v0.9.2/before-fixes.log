@@ -1,0 +1,12 @@
+--- FAIL: TestLoadUnixSocketAddress (0.00s)
+    --- FAIL: TestLoadUnixSocketAddress/unix:/run/authd/authd.sock (0.00s)
+        unix_test.go:17: AUTHD_LISTEN must be host:port with a numeric port from 1 through 65535
+    --- FAIL: TestLoadUnixSocketAddress//run/authd/authd.sock (0.00s)
+        unix_test.go:17: AUTHD_LISTEN must be host:port with a numeric port from 1 through 65535
+FAIL
+FAIL	github.com/yellowman/authd/internal/config	0.007s
+--- FAIL: TestUnixPeerNameIsNotAClientIP (0.00s)
+    unix_proxy_test.go:21: Unix peer name became client IP: "192.0.2.77"
+FAIL
+FAIL	github.com/yellowman/authd/internal/web	0.008s
+FAIL

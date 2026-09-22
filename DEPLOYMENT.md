@@ -301,6 +301,7 @@ This additionally installs:
 
 ```text
 /etc/rc.d/authd
+/usr/local/libexec/authd-run
 ```
 
 ### 7.2 Linux systemd
@@ -398,6 +399,27 @@ in `DATABASE_URL` works, but `PGPASSFILE` is preferred.
 The master key encrypts TOTP seeds and OIDC signing private keys. Service start
 MUST NOT generate or replace it.
 
+### 8.1 Optional Unix-socket HTTP transport (v0.9.2+)
+
+The earlier `127.0.0.1:8080` configuration remains valid. For a local Linux proxy,
+authd now also accepts the socket below; OpenBSD normally uses
+`unix:/var/run/authd/authd.sock`. Both native installers preserve your current
+transport setting instead of switching a live upstream implicitly.
+
+```sh
+AUTHD_LISTEN='unix:/run/authd/authd.sock'
+AUTHD_UNIX_MODE='0660'
+AUTHD_UNIX_GROUP='authd_proxy'
+AUTHD_TRUST_UNIX_PROXY='true'
+```
+
+Keep `AUTHD_ISSUER` as the public HTTPS origin. Complete the distinct proxy-group,
+runtime-directory, service and nginx namespace steps in
+[`docs/UNIX_SOCKET.md`](docs/UNIX_SOCKET.md) **before** using this example. Never
+add the proxy worker to the private `_authd` group to make the socket reachable.
+Without an explicit mode the socket is daemon-only `0600`; without explicit Unix
+proxy trust forwarded IPs are ignored. No TCP fallback occurs after a bind failure.
+
 ## 9. Bootstrap the first authd administrator
 
 Run bootstrap as `_authd` with the same environment the service will use.
@@ -442,11 +464,13 @@ doas rcctl restart authd
 doas rcctl stop authd
 ```
 
-The rc.d wrapper follows the WaveControl convention: it sources
-`/etc/authd/authd.env` with `set -a` while validating configuration and again
-inside `rc_exec` after `daemon_user=_authd` is applied. Runtime environment
-variables therefore survive the privilege transition without being placed in
-`authd_flags` or `/etc/rc.conf.local`.
+The rc.d wrapper retains the WaveControl environment convention but uses
+rc.subr's standard `rc_bg=YES` start/background/wait path for this foreground
+Go server. `rc_pre` checks configuration and the supported Unix runtime directory.
+The installed `/usr/local/libexec/authd-run` launcher sources the environment with
+`set -a` after `daemon_user=_authd` is applied, then execs the binary. Variables
+survive the privilege transition without secrets in `authd_flags` or
+`/etc/rc.conf.local`. The process expression excludes administrative CLI commands.
 
 ### 10.2 Linux systemd
 
@@ -480,10 +504,17 @@ bootstrap token, and create the first `system-admin` user.
 
 ## 11. HTTPS reverse proxy
 
-Production authd requires an HTTPS issuer. Keep the authd listener on loopback
-and place nginx, relayd, or another HTTPS reverse proxy in front.
+Production authd requires an HTTPS issuer. Use either loopback TCP or a
+filesystem-restricted Unix listener behind the same HTTPS reverse proxy. Changing
+the internal transport MUST NOT change the issuer, registered callbacks, secure
+cookies or public TLS configuration.
 
-Minimal nginx location:
+For Unix transport use [`docs/UNIX_SOCKET.md`](docs/UNIX_SOCKET.md) and
+`deploy/nginx/authd.conf.example` (installed under `/usr/local/share/authd/nginx/`).
+That guide distinguishes an OpenBSD chroot path from the host's socket path.
+Verify the new listener before changing the live upstream.
+
+For the existing TCP transport, a minimal nginx location is:
 
 ```nginx
 location / {
@@ -625,6 +656,21 @@ role/database setup with owner migration/runtime bootstrap, and a live provider
 flow. It does not qualify a restored production database, the actual bdcmaps
 callback, HTTPS/proxying, native service installation, live MFA, or Linux race/
 systemd execution. Details and the verbatim report are in `VALIDATION.md`.
+
+## 17. v0.9.1 → v0.9.2 Unix-listener update
+
+Install the new binary and service assets to gain Unix support. Migration files
+001–005 and dependency locks are unchanged; there is no v0.9.2 database migration,
+rebootstrap, session reset or credential/key rotation. A restart is necessary
+because this changes runtime code, unlike the v0.9.1 documentation update.
+
+Use the existing build/test/stop/backup/install/start discipline. If switching
+transport, follow the socket guide's cutover: configure the dedicated group and
+runtime directory, start authd, test direct socket health as the proxy user, then
+validate/reload the proxy and exercise HTTPS discovery/login and the real RP
+callback. Keep the old TCP upstream available as configuration for rollback; do
+not select it silently when Unix startup fails. Custom service-file copies must
+also include the new OpenBSD launcher or Linux runtime-directory settings.
 
 ## PostgreSQL command references
 

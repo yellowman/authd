@@ -100,3 +100,17 @@ and command mappings; separately enrolled legacy network credentials only when a
 device actually requires them; separate resource-server audiences; multi-instance
 deployment. No weakened primary password store, generic plugin framework, or
 second identity database.
+
+## v0.9.2 transport tranche
+
+Implemented source: TCP/Unix listener selection; restrictive socket publication;
+lifetime lock, stale-path refusal/recovery and inode-safe shutdown; explicit
+Unix-proxy IP trust; Linux runtime-directory sandbox allowance; OpenBSD standard
+rc.subr background/start plus post-su environment launcher; socket/chroot/cutover
+documentation. No dependency or migration added.
+
+Qualification remains separate: run `make verify-openbsd` with real dependencies,
+exercise native rcctl start/check/restart/stop and a SIGKILL/restart, inspect
+actual worker supplementary groups and chroot reachability, run Linux's full
+race/systemd gate, and exercise the real HTTPS/RP path. The repository's Linux
+socket/proxy fixtures do not constitute these deployment approvals.
