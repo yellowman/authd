@@ -7,16 +7,16 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-## v0.8.3 — greenfield native deployment on OpenBSD and Linux
+## v0.8.4 — repeatable native install and upgrade baseline
 
-v0.8.3 keeps the v0.8.2 PostgreSQL/OpenBSD deployment work and adds the same native service contract for Linux/systemd. The installer is now explicitly greenfield-only: it creates initial runtime state and refuses an existing active env/master-key pair instead of carrying upgrade-preservation logic before the project has an installed base. The v0.8.1 external run completed bootstrap, web login, client registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo, and refresh rotation against PostgreSQL. Native OpenBSD/Linux install and service-manager qualification remain external gates; see `VALIDATION.md`.
+v0.8.4 keeps the v0.8.3 OpenBSD/Linux service layout but corrects the installer contract: greenfield describes the current installed-base state, not a permanent restriction. First install creates missing env/master-key state; later installs replace binary/service/docs/examples while preserving active env, pgpass, master key, and PostgreSQL data. Migrations remain explicit under `authd_owner`. The v0.8.1 external run completed bootstrap, web login, client registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo, and refresh rotation against PostgreSQL. Native OpenBSD/Linux install and service-manager qualification remain external gates; see `VALIDATION.md`.
 
 Implemented in this revision:
 
 - `DEPLOYMENT.md` now covers a common greenfield PostgreSQL/bootstrap path plus native OpenBSD `rc.d` and Linux `systemd` service installation.
 - Added `deploy/postgresql/create-database.sql` for dedicated `authd_owner` / `authd_runtime` LOGIN roles and the authd database without embedding passwords.
 - OpenBSD keeps the WaveControl-style `rc.d` env propagation; Linux now has the corresponding WaveControl-style systemd unit using the same `/etc/authd/authd.env` contract.
-- Added common native install/service targets plus `make install-openbsd` and `make install-linux`; the greenfield installer creates first-use env/master-key files and refuses existing active state.
+- Added common native install/service targets plus `make install-openbsd` and `make install-linux`; first install creates missing env/master-key files and later installs preserve active runtime state while refreshing versioned assets.
 - `authd migrate` now requires only `DATABASE_URL`, keeping the migration-owner credential and daemon master key/issuer configuration separate.
 - Native runtime PostgreSQL credentials may use `_authd`-only `/etc/authd/pgpass` via `PGPASSFILE`, avoiding a password embedded in `DATABASE_URL` on either OpenBSD or Linux.
 - OIDC `acr_values` handling with `urn:authd:acr:pwd` and `urn:authd:acr:mfa`, client-level MFA minimums, and `unmet_authentication_requirements` when the requested context cannot be satisfied.

@@ -27,8 +27,10 @@ Expected installed permissions:
 /usr/local/bin/authd        root:bin      0755
 ```
 
-`make install-openbsd` is a greenfield-only installer. It creates the service
-account, binary/service, active env file, and first master key. If an active env
-or master-key file already exists it refuses to continue; upgrade/merge policy is
-not implemented yet. It does **not** create `/etc/authd/pgpass`; the operator
-must populate that file with the real `authd_runtime` password.
+`make install-openbsd` is safe to run for both first installation and normal
+binary/service upgrades. On first install it creates a missing active env file and
+master key. On later installs it preserves the existing env, master key, and
+pgpass contents while replacing the binary, examples, documentation, and rc.d
+script. Database migration remains an explicit `authd migrate` step with the
+migration-owner credential. It does **not** create `/etc/authd/pgpass`; the
+operator must populate that file with the real `authd_runtime` password.

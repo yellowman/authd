@@ -110,13 +110,14 @@ dev-db:
 dev-db-down:
 	docker compose -f compose.dev.yml down
 
-# Generic native install. This is intentionally a greenfield installer: it
-# refuses to replace an existing active env/master key instead of pretending
-# to implement an upgrade/merge policy.
+# Generic native install. The first install creates missing runtime state;
+# later installs replace program/service/documentation assets while preserving
+# deployment-owned configuration, PostgreSQL credentials, and master-key data.
 install: env-check install-user install-files install-config install-service
 	@echo ""
-	@echo "authd installed."
-	@echo "Complete ${ENVFILE} and ${PGPASS_PATH}, then follow ${DOCDIR}/DEPLOYMENT.md."
+	@echo "authd program/service assets installed."
+	@echo "First install: complete ${ENVFILE} and ${PGPASS_PATH}. Upgrade: run reviewed migrations before restart."
+	@echo "See ${DOCDIR}/DEPLOYMENT.md."
 
 install-openbsd:
 	@${MAKE} INSTALL_OS=OpenBSD install
@@ -175,16 +176,26 @@ install-config:
 		echo "staged install: active env, pgpass, and master key are not created"; \
 		exit 0; \
 	fi; \
-	if [ -e "${ENVFILE}" ] || [ -e "${MASTERKEY}" ]; then \
-		echo "active authd configuration already exists; this is a greenfield-only installer" >&2; \
-		echo "remove/review ${ENVFILE} and ${MASTERKEY} explicitly before reinstalling" >&2; \
-		exit 1; \
-	fi; \
 	chown root:"${RUN_GROUP}" "${CONFDIR}" "${CONFDIR}/authd.env.example" "${CONFDIR}/pgpass.example"; \
-	install -m 0640 -o root -g "${RUN_GROUP}" .env.example "${ENVFILE}"; \
-	tmp="${MASTERKEY}.new.$$$$"; umask 077; ./scripts/generate-master-key.sh > "$$tmp"; \
-	install -m 0400 -o "${RUN_USER}" -g "${RUN_GROUP}" "$$tmp" "${MASTERKEY}"; rm -f "$$tmp"; \
-	echo "created ${ENVFILE} and ${MASTERKEY}; edit the env file before first start"
+	if [ -e "${ENVFILE}" ]; then \
+		chown root:"${RUN_GROUP}" "${ENVFILE}"; chmod 0640 "${ENVFILE}"; \
+		echo "preserving existing ${ENVFILE}"; \
+	else \
+		install -m 0640 -o root -g "${RUN_GROUP}" .env.example "${ENVFILE}"; \
+		echo "created ${ENVFILE}; edit it before first start"; \
+	fi; \
+	if [ -e "${MASTERKEY}" ]; then \
+		chown "${RUN_USER}":"${RUN_GROUP}" "${MASTERKEY}"; chmod 0400 "${MASTERKEY}"; \
+		echo "preserving existing ${MASTERKEY}"; \
+	else \
+		tmp="${MASTERKEY}.new.$$$$"; umask 077; ./scripts/generate-master-key.sh > "$$tmp"; \
+		install -m 0400 -o "${RUN_USER}" -g "${RUN_GROUP}" "$$tmp" "${MASTERKEY}"; rm -f "$$tmp"; \
+		echo "created ${MASTERKEY}; back it up before production use"; \
+	fi; \
+	if [ -e "${PGPASS_PATH}" ]; then \
+		chown "${RUN_USER}":"${RUN_GROUP}" "${PGPASS_PATH}"; chmod 0400 "${PGPASS_PATH}"; \
+		echo "preserving existing ${PGPASS_PATH}"; \
+	fi
 
 install-service:
 	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
@@ -246,6 +257,6 @@ help:
 		'make verify                   Run full test/race/vet/PostgreSQL gate' \
 		'make verify-openbsd           Native OpenBSD gate (no race detector)' \
 		'make verify-linux             Native Linux/systemd gate' \
-		'make install-openbsd          Fresh OpenBSD install' \
-		'make install-linux            Fresh Linux/systemd install' \
+		'make install-openbsd          Install/update OpenBSD assets; preserve runtime state' \
+		'make install-linux            Install/update Linux assets; preserve runtime state' \
 		'make enable|start|restart     Manage installed service for current OS'

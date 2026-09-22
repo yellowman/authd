@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.4 — repeatable native install/update baseline
+
+Corrected the v0.8.3 over-specialization around greenfield deployment. `make install-openbsd` and `make install-linux` are now safe repeatable install/update targets: they create missing env/master-key state on first install, preserve existing active env/master-key/pgpass contents on later runs, and refresh the binary, examples, documentation, PostgreSQL helper SQL, and service-manager definition. Existing runtime file ownership/modes are reasserted. PostgreSQL data is never an installer-owned artifact.
+
+Schema migration remains deliberately explicit and separate from installation: upgrades run the new release binary's `authd migrate` using `authd_owner`, optionally reapply the idempotent runtime grants, then install/restart under `authd_runtime`. The deployment guide now documents that normal upgrade sequence and warns that executable rollback after a successful schema migration is not a substitute for a reviewed database rollback plan.
+
 ## v0.8.3 — greenfield native services on OpenBSD and Linux
 
 Added a WaveControl-style Linux systemd unit using the same `/etc/authd/authd.env`, `_authd`, master-key, and `PGPASSFILE` contract as OpenBSD. Added `make install-linux`, common native service-control targets, `make verify-linux`, environment-template parity checks, and systemd unit validation.

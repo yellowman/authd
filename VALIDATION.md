@@ -1,8 +1,8 @@
-# v0.8.3 validation record
+# v0.8.4 validation record
 
-## v0.8.3 native deployment-source additions — not yet externally rerun
+## v0.8.4 native deployment/update additions — not yet externally rerun
 
-v0.8.3 retains the greenfield PostgreSQL role/database bootstrap and OpenBSD rc.d path, adds a matching Linux systemd service/install layout, and deliberately simplifies installation to a greenfield-only contract: first install creates active env/master-key state and any subsequent native install refuses until explicit upgrade semantics exist. Both service managers use the same `/etc/authd/authd.env` / master-key / pgpass layout. These deployment artifacts have passed source/static/offline checks in the authoring environment but have **not yet** been rerun through a fresh native OpenBSD or Linux service install/runtime-role witness. The successful external v0.8.1 provider/PostgreSQL evidence below remains valid for the core it exercised.
+v0.8.4 retains the PostgreSQL role/database bootstrap plus OpenBSD rc.d and Linux systemd layouts, and changes native installation from a first-install-only contract to the normal repeatable model. Missing env/master-key state is created on first install; later installs preserve active env, pgpass, master key, and PostgreSQL data while refreshing binary/documentation/examples/service definitions. Schema migration remains explicit under the migration-owner credential. These deployment artifacts have passed source/static/offline checks in the authoring environment but have **not yet** been rerun through a native OpenBSD or Linux service upgrade witness. The successful external v0.8.1 provider/PostgreSQL evidence below remains valid for the core it exercised.
 
 Authoring-environment evidence for this tranche:
 
@@ -11,10 +11,10 @@ Authoring-environment evidence for this tranche:
 - `make env-check` PASS, proving the OpenBSD/systemd env examples equal the canonical `.env.example`;
 - `make linux-deploy-check` PASS using `systemd-analyze verify` on the exact unit directives with source-tree path substitutions for the not-yet-installed binary/env file;
 - OpenBSD rc.d syntax remains checked with native `ksh -n` when available, and `make verify-openbsd` includes the native check;
-- `make -n install-openbsd DESTDIR=...` and `make -n install-linux DESTDIR=...` expand without unintended host-side operations;
-- actual staged OpenBSD and Linux installs with a dummy executable produced only binary/documentation/SQL/example/service assets and did **not** create active env, pgpass, master key, user, or group state inside the staging trees.
+- staged OpenBSD and Linux installs create only package assets/examples and do **not** create active env, pgpass, master key, user, or group state inside `DESTDIR`;
+- a real-host-style temporary `install-config` was executed twice in the authoring container and the second run preserved the byte contents of the active env, master key, and pgpass while reasserting their expected modes.
 
-The PostgreSQL `create-database.sql`, actual rc.d privilege/env behavior, and actual systemd sandbox/env behavior still need execution on external native hosts.
+The PostgreSQL `create-database.sql`, actual rc.d privilege/env behavior, actual systemd sandbox/env behavior, and a real native upgrade remain external qualification items.
 
 ## External OpenBSD/PostgreSQL qualification — 2026-09-22
 
@@ -55,7 +55,7 @@ reported checks.
 
 The authoring container toolchain is Go 1.23.2. The production module requires Go 1.26 and
 its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.8.3 tree:
+Within that boundary, the following checks passed on the current v0.8.4 tree:
 
 | Check | Result and scope |
 |---|---|
@@ -147,7 +147,7 @@ environment. Therefore the following have **not** passed here:
 - backup/restore, master-key rotation, HA or production deployment qualification.
 
 The prior v0.4 Chromium fixture review covered the base Liminal-derived login,
-account and administration layout. v0.8/v0.8.3 lifecycle/Clients/Keys/ACR branches are covered
+account and administration layout. v0.8/v0.8.4 lifecycle/Clients/Keys/ACR branches are covered
 by template rendering tests here, but it has not been re-reviewed in a live
 browser/daemon environment and is not claimed as such.
 

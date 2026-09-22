@@ -1,9 +1,10 @@
 # authd deployment
 
-This is the greenfield native deployment procedure for authd. It covers the
-PostgreSQL cluster/database/LOGIN-role boundary, schema migration, DML-only
-runtime grants, the `_authd` service account, runtime secrets, first-admin
-bootstrap, OpenBSD `rc.d`, Linux `systemd`, and the HTTPS reverse-proxy boundary.
+This is the native deployment and upgrade procedure for authd. It covers the
+initial PostgreSQL cluster/database/LOGIN-role bootstrap, schema migration,
+DML-only runtime grants, the `_authd` service account, runtime secrets,
+first-admin bootstrap, repeatable OpenBSD `rc.d` / Linux `systemd` installation,
+and the HTTPS reverse-proxy boundary.
 
 The examples use these names:
 
@@ -16,9 +17,11 @@ OS daemon user: _authd
 
 Change them consistently if a site requires different names.
 
-The native installer is intentionally **greenfield-only**. `make install-openbsd`
-and `make install-linux` create first-install runtime state and refuse an existing
-active env/master key. There is no automated upgrade/merge policy yet.
+`make install-openbsd` and `make install-linux` are repeatable. On first install
+they create missing runtime env/master-key state. On later installs they replace
+the binary, examples, documentation, and service definition while preserving the
+active env, pgpass, master key, and PostgreSQL data. Schema migration remains an
+explicit owner-credential step rather than an install-time side effect.
 
 ## 1. Trust boundaries
 
@@ -274,13 +277,22 @@ restart-on-failure, and systemd sandboxing (`NoNewPrivileges`, private tmp/devic
 read-only system paths, kernel/control-group protection, and restricted address
 families).
 
-### 7.3 Greenfield-only installer behavior
+### 7.3 Repeatable installer behavior
 
-The current native installer is deliberately not an upgrade mechanism. On a
-real host it creates the first active env and master-key files. If either
-`/etc/authd/authd.env` or `/etc/authd/master.key` already exists, installation
-fails and requires an explicit operator decision instead of overwriting or
-merging state.
+On the first real-host install, the native installer creates a missing
+`/etc/authd/authd.env` from the current example and generates a missing
+`/etc/authd/master.key`. It never creates the active pgpass file because only the
+operator knows the PostgreSQL runtime password.
+
+On subsequent installs, existing `/etc/authd/authd.env`, `/etc/authd/master.key`,
+and `/etc/authd/pgpass` contents are preserved. Their expected ownership/mode is
+reasserted, while the binary, example files, documentation, PostgreSQL helper SQL,
+and service definition are replaced with the new release.
+
+The installer deliberately does **not** run `authd migrate` or use the
+migration-owner credential. Keeping migration explicit preserves the
+`authd_owner` / `authd_runtime` privilege split and makes schema changes visible
+to the operator before restart.
 
 A `DESTDIR` staged/package install creates only distributable assets and examples;
 it does not create users, active config, pgpass, or a master key.
@@ -459,23 +471,34 @@ local-authority, ACR, and `sid` integration contract, see
 
 ## 13. Updating an existing installation
 
-There is intentionally no automated native upgrade installer yet. The
-`make install-*` targets are first-install-only and refuse active config/key
-state.
+Normal upgrades reuse the same install targets as the first installation. The
+active database, env, pgpass, and master key are deployment state and are not
+replaced by `make install-openbsd` or `make install-linux`.
 
-Until an explicit upgrade contract exists, a reviewed update is manual:
+Recommended upgrade sequence:
 
 ```text
-1. stop or drain authd;
-2. back up PostgreSQL and /etc/authd/master.key;
-3. replace /usr/local/bin/authd with the reviewed new binary;
-4. run that binary's `authd migrate` using authd_owner;
-5. re-run runtime-grants.sql using authd_owner;
-6. start authd with the unchanged runtime env/key;
-7. run health/OIDC smoke tests.
+1. build and validate the new release;
+2. stop or drain authd;
+3. back up PostgreSQL plus /etc/authd/master.key and runtime configuration;
+4. run the NEW release binary's `authd migrate` using authd_owner;
+5. re-run runtime-grants.sql using authd_owner (safe/idempotent grant repair);
+6. run make install-openbsd or make install-linux;
+7. restart authd with the unchanged runtime env/key/pgpass;
+8. run health, discovery, JWKS, login, and relying-party smoke tests.
 ```
 
-Do not rerun the greenfield installer over an active deployment.
+Running the new release binary from the build tree for step 4 means a failed
+migration does not first overwrite the currently installed executable. Each
+migration is transactional, but a release that has successfully advanced the
+schema may not be compatible with an older binary; rollback therefore means a
+reviewed database restore or a release-specific backward-compatible plan, not
+blindly reinstalling an old executable.
+
+An ordinary installer rerun may update service-manager definitions. On Linux,
+run `systemctl daemon-reload` before restart (the Makefile `restart` target does
+this). On OpenBSD, the newly installed rc.d script is used on the next service
+operation.
 
 ## 14. Backups
 

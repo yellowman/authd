@@ -23,7 +23,9 @@ The service uses systemd `EnvironmentFile=/etc/authd/authd.env`; no database
 password, issuer, or master key is encoded in the unit. `PGPASSFILE` in the env
 file points pgx at the daemon-readable PostgreSQL password file.
 
-`make install-linux` is deliberately a **greenfield-only** installer. It creates
-the service account and first active env/master-key files and refuses to replace
-an existing active installation. Upgrade/merge semantics will be added when the
-project has an installed base that actually requires them.
+`make install-linux` is safe to run for both first installation and normal
+binary/service upgrades. It creates a missing active env file and master key on
+first install, then preserves the existing env, master key, and pgpass contents
+on later installs while replacing program/service/documentation assets. Database
+migration remains an explicit `authd migrate` step with the migration-owner
+credential.

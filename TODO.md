@@ -1,4 +1,4 @@
-# Implementation sequence — v0.8.3
+# Implementation sequence — v0.8.4
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -69,6 +69,7 @@ actual bdcmaps login remain the first external gates.
 - [x] Greenfield PostgreSQL database/LOGIN-role bootstrap SQL and complete `DEPLOYMENT.md`.
 - [x] Native OpenBSD `_authd` install layout and rc.d env-file propagation.
 - [x] Native Linux `_authd` install layout and WaveControl-style systemd EnvironmentFile service.
+- [x] Repeatable native install/update path that preserves env, pgpass, master key, and database state while keeping migration explicit.
 - [ ] Fresh native OpenBSD install witness covering runtime-role separation, rc.d enable/start/restart/stop, and env/pgpass permissions.
 - [ ] Fresh Linux install witness covering runtime-role separation, systemd enable/start/restart/stop, sandboxing, and env/pgpass permissions.
 - [ ] Backup/restore and master-key rotation.

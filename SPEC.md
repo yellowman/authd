@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.8.3
+## Specification v0.8.4
 
-Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. v0.8.3 defines one greenfield native deployment contract for PostgreSQL plus OpenBSD rc.d and Linux systemd. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. v0.8.4 defines a repeatable native deployment contract for PostgreSQL plus OpenBSD rc.d and Linux systemd: first install creates missing runtime state; ordinary upgrades preserve it while replacing program/service assets. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -1591,7 +1591,7 @@ Production deployments SHOULD use a migration/owner PostgreSQL role for `authd m
 
 Native Unix deployments SHOULD run the daemon as a dedicated unprivileged `_authd` account and use the same runtime file contract on OpenBSD and Linux: `/etc/authd/authd.env`, `/etc/authd/master.key`, and (when used) `/etc/authd/pgpass`. OpenBSD rc.d MUST export the env file in the daemon execution shell after privilege transition; Linux systemd SHOULD use `EnvironmentFile=/etc/authd/authd.env` and run directly as `_authd`. The migration-owner connection MUST remain separate from this runtime environment. When practical, the runtime PostgreSQL password SHOULD be supplied through a daemon-readable `PGPASSFILE` rather than embedded directly in `DATABASE_URL`.
 
-The native installer is greenfield-only in the initial release. It MAY create the first active env and master-key files, but MUST refuse to replace an existing active install until an explicit upgrade/merge contract exists. Service start MUST never generate a new master key.
+The native installer MAY create missing active env and master-key files on first installation. On subsequent installations it MUST preserve the contents of the active env, pgpass, master key, and PostgreSQL database while replacing versioned program, documentation, example, and service-manager assets. It MUST NOT run schema migration implicitly or require the migration-owner credential. Service start MUST never generate or replace a master key.
 
 No external migration framework is required initially.
 
@@ -2245,7 +2245,7 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.8.3 implementation limits and evidence
+# 45. v0.8.4 implementation limits and evidence
 
 This revision implements the identity/bootstrap/session/MFA/admin source slice and
 the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
@@ -2295,8 +2295,8 @@ qualification, and further operation-specific audit detail remain TODO items. Tr
 resolution is implemented through an explicit CIDR allow-list; rate limiting remains
 process-local and therefore single-instance. Normal daemon/bootstrap startup performs
 no DDL and verifies the exact embedded migration manifest; `authd migrate` is the
-explicit schema-owner path. The first native installer supports OpenBSD rc.d and
-Linux systemd from one shared runtime-file contract and is deliberately greenfield-only. Internal HTTP failures expose a request reference and log
+explicit schema-owner path. The native installer supports OpenBSD rc.d and
+Linux systemd from one shared runtime-file contract. First install creates missing env/master-key state; ordinary installer reruns preserve env/master-key/pgpass/database state while refreshing the binary, examples, documentation, and service definition. Schema migration remains an explicit owner-credential step. Internal HTTP failures expose a request reference and log
 only a bounded error class rather than the raw underlying driver error.
 Only implemented local-provider sessions are revoked by local logout. Existing
 relying-party application sessions are outside that operation.
