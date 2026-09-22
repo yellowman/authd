@@ -1,0 +1,27 @@
+{{define "account.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}} · authd</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="simple-page">
+    <a class="back-link" href="/admin/">← Administration</a>
+    <div class="eyebrow">ACCOUNT</div>
+    <h1>Your identity</h1>
+    <p class="lead">Password, MFA, recovery codes, and active sessions will live here. Applications do not implement those flows themselves.</p>
+    <section class="data-section">
+      <div class="rows">
+        <div class="data-row"><span>Profile</span><strong class="warn">NEXT</strong></div>
+        <div class="data-row"><span>Password</span><strong class="warn">NEXT</strong></div>
+        <div class="data-row"><span>TOTP</span><strong class="warn">NEXT</strong></div>
+        <div class="data-row"><span>Sessions</span><strong class="warn">NEXT</strong></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

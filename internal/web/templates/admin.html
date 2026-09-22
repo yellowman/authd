@@ -1,0 +1,100 @@
+{{define "admin.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}} · authd</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Primary navigation">
+      <a class="rail-mark" href="/admin/" aria-label="authd home">A</a>
+      <nav class="rail-nav">
+        <a class="rail-item active" href="/admin/" title="Overview" aria-label="Overview">O</a>
+        <a class="rail-item" href="#users" title="Users" aria-label="Users">U</a>
+        <a class="rail-item" href="#roles" title="Roles" aria-label="Roles">R</a>
+        <a class="rail-item" href="#clients" title="Clients" aria-label="Clients">C</a>
+        <a class="rail-item" href="#audit" title="Audit" aria-label="Audit">A</a>
+      </nav>
+      <a class="rail-item rail-bottom" href="/account" title="Account" aria-label="Account">@</a>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">AUTHD / CONTROL PLANE</div>
+          <h1>Administration</h1>
+        </div>
+        <div class="topbar-meta">
+          <span class="status status-warn"><span></span>SCAFFOLD</span>
+          <code>{{.Issuer}}</code>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="section-band">
+          <div>
+            <div class="eyebrow">FOUNDATION</div>
+            <h2>Identity service baseline</h2>
+          </div>
+          <p>Protocol and storage boundaries are defined. Token issuance and live administration are the next slice.</p>
+        </section>
+
+        <section class="data-section" aria-labelledby="state-title">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">SYSTEM</span>
+              <h2 id="state-title">Current state</h2>
+            </div>
+            <span class="muted small">Initial repository</span>
+          </div>
+          <div class="rows">
+            <div class="data-row"><span>PostgreSQL schema</span><strong class="good">READY</strong><span class="row-note">users · roles · permissions · clients · sessions · tokens · audit</span></div>
+            <div class="data-row"><span>OIDC discovery</span><strong class="good">READY</strong><span class="row-note">bdcmaps-compatible metadata and scopes</span></div>
+            <div class="data-row"><span>Password primitive</span><strong class="good">READY</strong><span class="row-note">Argon2id</span></div>
+            <div class="data-row"><span>TOTP primitive</span><strong class="good">READY</strong><span class="row-note">RFC 6238-compatible</span></div>
+            <div class="data-row"><span>Authorization endpoint</span><strong class="warn">NEXT</strong><span class="row-note">request validation · login transaction · consent policy</span></div>
+            <div class="data-row"><span>Token endpoint</span><strong class="warn">NEXT</strong><span class="row-note">code exchange · signing · refresh rotation</span></div>
+          </div>
+        </section>
+
+        <section class="data-section" id="users">
+          <div class="section-heading">
+            <div><span class="eyebrow">IDENTITY</span><h2>Users</h2></div>
+            <button class="button" disabled>Create user</button>
+          </div>
+          <div class="empty-row"><span>No live repository service wired yet.</span><span>Schema is ready for the first bootstrap administrator.</span></div>
+        </section>
+
+        <section class="split-grid">
+          <div class="data-section" id="roles">
+            <div class="section-heading"><div><span class="eyebrow">AUTHORIZATION</span><h2>Roles & permissions</h2></div></div>
+            <div class="rows compact">
+              <div class="data-row"><span>system-admin</span><code>system.admin</code></div>
+              <div class="data-row"><span>Application roles</span><span class="muted">additive permission bundles</span></div>
+              <div class="data-row"><span>Deny rules</span><span class="muted">none</span></div>
+            </div>
+          </div>
+          <div class="data-section" id="clients">
+            <div class="section-heading"><div><span class="eyebrow">PROTOCOL</span><h2>Clients</h2></div></div>
+            <div class="rows compact">
+              <div class="data-row"><span>First target</span><strong>bdcmaps</strong></div>
+              <div class="data-row"><span>Flow</span><code>code + PKCE S256</code></div>
+              <div class="data-row"><span>Compatibility</span><code>groups · client_secret_post</code></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="data-section" id="audit">
+          <div class="section-heading"><div><span class="eyebrow">EVIDENCE</span><h2>Audit</h2></div></div>
+          <div class="empty-row"><span>Audit events become visible when mutation services are implemented.</span><span>No credential or bearer material is ever logged.</span></div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
+{{end}}

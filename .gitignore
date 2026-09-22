@@ -1,0 +1,10 @@
+/authd
+/bin/
+/dist/
+.env
+*.local
+*.log
+*.pem
+*.key
+coverage.out
+.DS_Store
