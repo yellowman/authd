@@ -25,3 +25,21 @@ Before adding a dependency, document why the standard library or an existing dep
 ## Reporting
 
 Until a project-specific security mailbox is established, report issues privately to the repository owner rather than filing a public issue containing exploit details.
+
+
+## v0.4 operational status
+
+This is unqualified identity source, not a production OIDC release. Do not expose
+it to production traffic before completing the real dependency and PostgreSQL
+gates in VALIDATION.md. Offline unit doubles test orchestration, not password-KDF
+or SQL correctness. No module replacements count as release evidence.
+
+Keep master-key files owner-only. Use loopback-only development mode; production
+uses an HTTPS reverse proxy and authenticated PostgreSQL TLS. Forwarded IP headers
+are ignored until an explicit trusted-proxy implementation is reviewed. Run one
+active instance: limits and the demonstrated architecture do not claim HA support.
+
+Only an explicit local bootstrap command may display the initial setup token.
+Never put that token in a URL, system service logs, or persistent environment
+configuration. Setup cannot reopen when administrators are removed. Recovery and
+break-glass behavior still need a dedicated reviewed workflow.

@@ -1,0 +1,31 @@
+v0.4 actual partial validation output; see VALIDATION.md for scope and unrun gates.
+
+=== offline-validation ===
+ok  	github.com/yellowman/authd/internal/config	1.014s
+ok  	github.com/yellowman/authd/internal/cryptoutil	1.013s
+?   	github.com/yellowman/authd/internal/protocol	[no test files]
+ok  	github.com/yellowman/authd/internal/identity	1.015s
+ok  	github.com/yellowman/authd/internal/db	1.012s
+ok  	github.com/yellowman/authd/internal/oidc	1.013s
+ok  	github.com/yellowman/authd/internal/totp	1.009s
+ok  	github.com/yellowman/authd/internal/web	1.080s
+ok  	command-line-arguments	1.011s
+ok  	command-line-arguments	0.003s [no tests to run]
+
+PARTIAL CHECK ONLY: pgx, Argon2, full executable, PostgreSQL transactions, and OIDC interoperability were not exercised. Run make deps and make verify in the supported environment.
+
+=== fuzz ===
+fuzz: elapsed: 0s, gathering baseline coverage: 0/3 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 3/3 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 6259 (2085/sec), new interesting: 6 (total: 9)
+fuzz: elapsed: 4s, execs: 6259 (0/sec), new interesting: 6 (total: 9)
+PASS
+ok  	command-line-arguments	4.012s
+
+=== missing-db-gate ===
+AUTHD_TEST_DISPOSABLE=1 required
+make: *** [Makefile:31: integration] Error 1
+
+Upstream deployment reference for the PostgreSQL 18 volume correction:
+https://github.com/docker-library/docs/blob/master/postgres/README.md#pgdata
+The application dependency pins were not changed by this source delivery.

@@ -1,0 +1,4 @@
+{{define "head"}}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}} · authd</title><link rel="stylesheet" href="/static/app.css">{{end}}
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+{{define "notice"}}{{if .Error}}<p class="message error" role="alert">{{.Error}}</p>{{end}}{{if .Notice}}<p class="message" role="status">{{.Notice}}</p>{{end}}{{end}}
+{{define "brand"}}<section class="auth-brand" aria-label="authd"><div class="mark" aria-hidden="true">A</div><div><div class="eyebrow">IDENTITY SERVICE</div><h1>authd</h1><p>One account. The applications you operate.</p></div></section>{{end}}

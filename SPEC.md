@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.3
+## Specification v0.4
 
-Status: initial binding design for implementation.
+Status: binding product design. v0.4 implements the local identity/admin slice; it does not complete the OIDC provider. See TODO.md and VALIDATION.md for implementation and qualification status.
 
 ## 1. Purpose
 
@@ -235,7 +235,7 @@ Permission names MUST match:
 [a-z0-9][a-z0-9._:-]*
 ```
 
-Permission names are globally unique.
+Permission names are globally unique. The identity/control scope names `openid`, `profile`, `email`, `groups`, `roles`, and `offline_access` are reserved and cannot be application permissions.
 
 Reserved provider permission:
 
@@ -440,7 +440,14 @@ Recovery codes:
 
 TOTP secrets require reversible storage and therefore MUST be encrypted at rest under a deployment master key held outside PostgreSQL.
 
-The provider SHOULD retain the most recently accepted TOTP counter and reject immediate replay of the same time step.
+The provider MUST retain the most recently accepted TOTP counter and reject a
+counter that has already been accepted. Counter/recovery-code consumption and
+session insertion MUST share a transaction, so failure cannot leave a consumed
+factor without the corresponding committed session. Enrollment is unconfirmed,
+encrypted, session-bound state expiring after ten minutes. Enrollment/removal
+requires the current password and a sign-in within the preceding ten minutes.
+Removal also requires a session authenticated with OTP or a recovery code.
+Credential changes revoke provider sessions and refresh-token families.
 
 Authentication Method References use at least:
 
@@ -1266,7 +1273,12 @@ Administration requires:
 system.admin
 ```
 
-Every admin request verifies the permission server-side.
+Every admin request verifies the permission server-side. Administrative writes
+also recheck the live session and `system.admin` inside the mutation transaction.
+They require authentication within the preceding ten minutes. Read-only admin
+views remain available to older live sessions. Enabling/disabling users, changing
+role assignments, or editing roles MUST preserve at least one enabled, non-deleted
+holder of `system.admin`; concurrent mutations MUST serialize this invariant.
 
 The UI uses server-rendered HTML and embedded static assets.
 
@@ -1442,28 +1454,24 @@ Deletion warns if a key may still be required to validate unexpired tokens.
 
 A clean database contains no human users.
 
-If no administrator exists:
+Bootstrap is initiated explicitly with `authd bootstrap` on the service host.
+The command generates at least 256 random bits, records only the token hash with
+a 30-minute expiry, invalidates previous unconsumed bootstrap tokens, and prints
+the new token to the operator's terminal. The daemon MUST NOT print bootstrap
+secrets into its regular logs. The command does not create the administrator.
 
-1. Generate a random one-time bootstrap token.
-2. Print the setup URL and token to the service console.
-3. Enable `/setup` for bootstrap only.
-4. Allow creation of exactly one initial administrator and primary password credential.
-5. Assign `system-admin`.
-6. Invalidate the token atomically.
-7. Disable bootstrap once an administrator exists.
+`/setup` accepts the token and first user's profile/password through a CSRF-
+protected form. Token consumption, user/password creation, assignment of
+`system-admin`, audit insertion, and marking installation complete MUST be one
+PostgreSQL transaction. Concurrent setup submissions can succeed at most once.
 
-Token requirements:
+A permanent `installation_state.bootstrap_completed` flag closes setup after the
+first success. Merely losing the final administrator or deleting users MUST NOT
+reopen setup. Upgrading a database with existing users or previously consumed
+bootstrap tokens closes bootstrap as well. Bootstrap is not a general recovery
+backdoor. An explicit administrative recovery process is separate future work.
 
-```text
->= 256 bits entropy
-single-use
-expires in 30 minutes
-stored only as a hash
-```
-
-Ordinary user creation occurs through the administration interface after bootstrap.
-
-A deployment may alternatively provide a one-shot administrative bootstrap command later, but it must obey the same one-time semantics and must not introduce long-lived admin credentials into environment variables.
+Ordinary user creation occurs through the administration interface after setup.
 
 ---
 
@@ -1499,7 +1507,7 @@ audit_events
 schema_migrations
 ```
 
-Migrations are embedded in the executable and applied in filename/version order while holding a PostgreSQL advisory lock.
+Migrations are embedded in the executable and applied in filename/version order under a transaction-scoped PostgreSQL advisory lock. Migration execution and version records commit together; pooled connections MUST NOT retain a migration lock after cancellation or return.
 
 No external migration framework is required initially.
 
@@ -2112,3 +2120,42 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 ```
 
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
+
+
+# 45. v0.4 implementation limits and evidence
+
+This revision implements the identity/bootstrap/session/MFA/admin source slice.
+OIDC authorization/code/token/refresh/UserInfo/revocation/RP-logout operations
+remain unavailable and return 501. Discovery metadata remains a preview of the
+product contract, not certification of those endpoints.
+
+The local identity implementation uses `database/sql` with the actual pgx driver
+registered by the executable; the dependency policy is unchanged. The direct
+Argon2 implementation is in `internal/password`; session/control-plane packages
+do not import the driver or KDF. These boundaries make the real pure components
+testable without substituting fake dependency modules.
+
+Initial safety bounds: four concurrent KDF operations; verifier memory 8–256 MiB,
+iterations 1–10, parallelism 1–8, salt/key 16–64 bytes; encoded record at most 512
+bytes; submitted password at least 12 Unicode characters and at most 1024 bytes.
+Malformed verifier parameters fail before expensive derivation. Process-local
+rate buckets and caller-controlled keys are bounded; this is not distributed
+rate limiting. Deployments must budget for up to four allowed verifier workloads.
+
+Provider mutations serialize on one short transaction-scoped advisory lock.
+Credential derivation occurs outside that lock; verified snapshots are compared
+again after acquiring it. This is intentionally a simple single-service design.
+The application requires live PostgreSQL for authentication and current grants;
+it does not fall back to cached allows after a database failure.
+
+The initial admin editor has an explicit 200-record catalog ceiling and fails
+closed instead of rendering an incomplete assignment list. Deletion, pagination,
+client CRUD, MFA reset/regeneration, cleanup, trusted-proxy IP handling, backup
+qualification, and further operation-specific audit detail remain TODO items.
+Only implemented local-provider sessions are revoked by local logout. Existing
+relying-party application sessions are outside that operation.
+
+Validation is recorded in VALIDATION.md. Unit fixtures do not prove PostgreSQL
+transactions, and typechecking the SQL-test body is not a real database test.
+The production dependency-backed build and real database gate are mandatory
+before deployment; offline checks cannot substitute for them.

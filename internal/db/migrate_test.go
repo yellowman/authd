@@ -38,3 +38,16 @@ func TestInitialSchemaOIDCClientsAreNotGenericProtocolPeers(t *testing.T) {
 		t.Fatal("OIDC clients table must not become a polymorphic protocol registry")
 	}
 }
+
+// Structural regression only; actual PostgreSQL execution is the integration gate.
+func TestLifecycleMigrationRetainsBootstrapAndTriggerGuards(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/002_identity_lifecycle.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"bootstrap_completed", "REFERENCES sessions(id) ON DELETE CASCADE", "END;\n$$;", "users_clear_email_verification"} {
+		if !strings.Contains(string(body), marker) {
+			t.Fatalf("missing migration guard %q", marker)
+		}
+	}
+}

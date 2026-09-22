@@ -2,49 +2,40 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-const migrationLockID int64 = 0x6175746864 // "authd"
+const migrationLockID int64 = 0x6175746864
 
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	conn, err := pool.Acquire(ctx)
+// Migration and its version records share a transaction-scoped lock. Connection
+// cancellation/return cannot strand a session-level advisory lock in a pool.
+func Migrate(ctx context.Context, pool *sql.DB) error {
+	tx, err := pool.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("acquire migration connection: %w", err)
+		return err
 	}
-	defer conn.Release()
-
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
-		return fmt.Errorf("acquire migration lock: %w", err)
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockID); err != nil {
+		return err
 	}
-	defer func() { _, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockID) }()
-
-	if _, err := conn.Exec(ctx, `
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version bigint PRIMARY KEY,
-    name text NOT NULL,
-    applied_at timestamptz NOT NULL DEFAULT now()
-)`); err != nil {
-		return fmt.Errorf("ensure schema_migrations: %w", err)
+	if _, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+ version bigint PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		return err
 	}
-
 	entries, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("read migrations: %w", err)
+		return err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
@@ -54,43 +45,30 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 			return err
 		}
 		var exists bool
-		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); err != nil {
-			return fmt.Errorf("check migration %d: %w", version, err)
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); err != nil {
+			return err
 		}
 		if exists {
 			continue
 		}
 		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
 		if err != nil {
-			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
+			return err
 		}
-		tx, err := conn.BeginTx(ctx, pgx.TxOptions{})
-		if err != nil {
-			return fmt.Errorf("begin migration %s: %w", entry.Name(), err)
+		if _, err = tx.ExecContext(ctx, string(body)); err != nil {
+			return fmt.Errorf("migration %s failed: %w", entry.Name(), err)
 		}
-		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version,name) VALUES($1,$2)`, version, entry.Name()); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("record migration %s: %w", entry.Name(), err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit migration %s: %w", entry.Name(), err)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version,name) VALUES($1,$2)`, version, entry.Name()); err != nil {
+			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
-
 func migrationVersion(name string) (int64, error) {
-	prefix := name
-	if idx := strings.IndexByte(prefix, '_'); idx >= 0 {
-		prefix = prefix[:idx]
-	}
+	prefix := strings.SplitN(name, "_", 2)[0]
 	version, err := strconv.ParseInt(prefix, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("migration %q does not start with an integer version", name)
+	if err != nil || version <= 0 {
+		return 0, fmt.Errorf("invalid migration version: %q", name)
 	}
 	return version, nil
 }

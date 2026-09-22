@@ -13,13 +13,17 @@ type User struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	LastLoginAt         *time.Time
+	RoleIDs             []string
+	Roles               []string
 }
 
 type Role struct {
-	ID          string
-	Name        string
-	Description string
-	BuiltIn     bool
+	ID            string
+	Name          string
+	Description   string
+	BuiltIn       bool
+	PermissionIDs []string
+	Permissions   []string
 }
 
 type Permission struct {

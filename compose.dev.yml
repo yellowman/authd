@@ -13,7 +13,7 @@ services:
       timeout: 2s
       retries: 20
     volumes:
-      - authd-postgres:/var/lib/postgresql/data
+      - authd-postgres:/var/lib/postgresql
 
 volumes:
   authd-postgres:

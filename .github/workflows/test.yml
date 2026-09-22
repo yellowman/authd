@@ -1,0 +1,36 @@
+name: authd identity checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: authd_test
+          POSTGRES_USER: authd_test
+          POSTGRES_PASSWORD: ci-disposable-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U authd_test -d authd_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AUTHD_TEST_DISPOSABLE: '1'
+      AUTHD_TEST_DATABASE_URL: postgres://authd_test:ci-disposable-only@127.0.0.1:5432/authd_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache: false
+      - name: Resolve real pinned modules
+        run: make deps
+      - name: Unit, race, vet, build, and PostgreSQL gate
+        run: make verify
+      # This is a workflow definition, not evidence that this run has occurred.

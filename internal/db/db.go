@@ -2,32 +2,27 @@ package db
 
 import (
 	"context"
-	"fmt"
+	"database/sql"
+	"errors"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
+// The executable registers pgx's database/sql driver. Keeping the registration
+// at that boundary avoids importing a driver into identity and HTTP packages.
+func Open(ctx context.Context, dsn string) (*sql.DB, error) {
+	pool, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("parse database config: %w", err)
+		return nil, errors.New("invalid PostgreSQL connection configuration")
 	}
-	cfg.MaxConns = 16
-	cfg.MinConns = 1
-	cfg.MaxConnLifetime = 30 * time.Minute
-	cfg.MaxConnIdleTime = 5 * time.Minute
-	cfg.HealthCheckPeriod = 30 * time.Second
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pool.SetMaxOpenConns(16)
+	pool.SetMaxIdleConns(4)
+	pool.SetConnMaxLifetime(30 * time.Minute)
+	pool.SetConnMaxIdleTime(5 * time.Minute)
+	ping, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
+	if err = pool.PingContext(ping); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, errors.New("PostgreSQL is unavailable")
 	}
 	return pool, nil
 }

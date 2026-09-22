@@ -42,17 +42,17 @@ A later RADIUS or TACACS+ listener may live in the same binary if the implementa
 
 ## Package ownership
 
-`internal/identity` owns protocol-neutral identity facts.
+`internal/identity` owns protocol-neutral identity facts, credential orchestration, bounded hash work, and validation. Its Store interface consists of use-case transactions, not generic CRUD.
 
 `internal/oidc` owns HTTP/OIDC semantics: discovery, authorization requests, authorization codes, token exchange, claims, logout, JWKS.
 
 `internal/protocol` defines the deliberately small adapter boundary for non-OIDC frontends. It is not a generic plugin framework.
 
-`internal/db` owns PostgreSQL connectivity and migration sequencing.
+`internal/db` owns PostgreSQL SQL/transactions via database/sql and migration sequencing. The executable registers pgx/stdlib; no additional database driver is introduced.
 
 `internal/web` owns provider-operated HTML surfaces. It must not contain authorization decisions that are absent from server-side handlers.
 
-`internal/cryptoutil` owns password hashing and opaque random secrets. Signing-key handling will get its own package when implemented rather than bloating the general utility package.
+`internal/password` owns the Argon2id implementation and bounded verifier parser. `internal/cryptoutil` owns opaque random secrets, CSRF MACs, and authenticated encryption. Signing-key handling will get its own package when implemented rather than bloating the general utility package.
 
 ## Identity model
 
@@ -132,3 +132,18 @@ A new dependency needs a specific reason. Preference order:
 3. Larger framework only when implementing the feature correctly would otherwise create more custom security-critical code than the framework removes.
 
 The starter uses only pgx and x/crypto.
+
+
+## v0.4 commit boundaries
+
+A short transaction-scoped advisory lock serializes identity mutations. Session
+and admin guards are re-evaluated in that transaction. Password hashing occurs
+outside it; the stored verifier and MFA seed are rechecked before minting a
+session. OTP/recovery consumption, session creation, and audit either all commit
+or all roll back. Password/MFA changes and disable use the same lock and revoke
+sessions and refresh families before commit. Live session reads re-resolve roles
+and permissions; no long-lived cached administrator grant is used.
+
+Bootstrap is an explicit one-time local command plus web form, closed by permanent
+installation state. OIDC issuance is still the next protocol slice. The internal
+Store contract is not a public SDK or a multi-backend database abstraction.

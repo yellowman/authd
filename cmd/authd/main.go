@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,8 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/db"
+	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/password"
 	webserver "github.com/yellowman/authd/internal/web"
 )
 
@@ -23,6 +28,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap") {
+		return errors.New("usage: authd [bootstrap]")
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -40,7 +48,20 @@ func run() error {
 		return err
 	}
 
-	app, err := webserver.New(cfg, pool)
+	service, err := identity.NewService(&db.IdentityStore{DB: pool}, password.Hasher{Params: password.DefaultArgon2Params}, cfg.MasterKey, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL)
+	if err != nil {
+		return err
+	}
+	if len(os.Args) == 2 {
+		token, err := service.IssueBootstrap(ctx)
+		if err != nil {
+			return err
+		}
+		// Explicit local command output, never the daemon's structured request log.
+		fmt.Fprintln(os.Stdout, token)
+		return nil
+	}
+	app, err := webserver.New(cfg, service, pool.PingContext)
 	if err != nil {
 		return err
 	}

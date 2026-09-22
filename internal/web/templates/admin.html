@@ -1,100 +1,14 @@
-{{define "admin.html"}}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{.Title}} · authd</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
-</head>
-<body>
-  <div class="app-shell">
-    <aside class="rail" aria-label="Primary navigation">
-      <a class="rail-mark" href="/admin/" aria-label="authd home">A</a>
-      <nav class="rail-nav">
-        <a class="rail-item active" href="/admin/" title="Overview" aria-label="Overview">O</a>
-        <a class="rail-item" href="#users" title="Users" aria-label="Users">U</a>
-        <a class="rail-item" href="#roles" title="Roles" aria-label="Roles">R</a>
-        <a class="rail-item" href="#clients" title="Clients" aria-label="Clients">C</a>
-        <a class="rail-item" href="#audit" title="Audit" aria-label="Audit">A</a>
-      </nav>
-      <a class="rail-item rail-bottom" href="/account" title="Account" aria-label="Account">@</a>
-    </aside>
-
-    <div class="workspace">
-      <header class="topbar">
-        <div>
-          <div class="eyebrow">AUTHD / CONTROL PLANE</div>
-          <h1>Administration</h1>
-        </div>
-        <div class="topbar-meta">
-          <span class="status status-warn"><span></span>SCAFFOLD</span>
-          <code>{{.Issuer}}</code>
-        </div>
-      </header>
-
-      <main class="content">
-        <section class="section-band">
-          <div>
-            <div class="eyebrow">FOUNDATION</div>
-            <h2>Identity service baseline</h2>
-          </div>
-          <p>Protocol and storage boundaries are defined. Token issuance and live administration are the next slice.</p>
-        </section>
-
-        <section class="data-section" aria-labelledby="state-title">
-          <div class="section-heading">
-            <div>
-              <span class="eyebrow">SYSTEM</span>
-              <h2 id="state-title">Current state</h2>
-            </div>
-            <span class="muted small">Initial repository</span>
-          </div>
-          <div class="rows">
-            <div class="data-row"><span>PostgreSQL schema</span><strong class="good">READY</strong><span class="row-note">users · roles · permissions · clients · sessions · tokens · audit</span></div>
-            <div class="data-row"><span>OIDC discovery</span><strong class="good">READY</strong><span class="row-note">bdcmaps-compatible metadata and scopes</span></div>
-            <div class="data-row"><span>Password primitive</span><strong class="good">READY</strong><span class="row-note">Argon2id</span></div>
-            <div class="data-row"><span>TOTP primitive</span><strong class="good">READY</strong><span class="row-note">RFC 6238-compatible</span></div>
-            <div class="data-row"><span>Authorization endpoint</span><strong class="warn">NEXT</strong><span class="row-note">request validation · login transaction · consent policy</span></div>
-            <div class="data-row"><span>Token endpoint</span><strong class="warn">NEXT</strong><span class="row-note">code exchange · signing · refresh rotation</span></div>
-          </div>
-        </section>
-
-        <section class="data-section" id="users">
-          <div class="section-heading">
-            <div><span class="eyebrow">IDENTITY</span><h2>Users</h2></div>
-            <button class="button" disabled>Create user</button>
-          </div>
-          <div class="empty-row"><span>No live repository service wired yet.</span><span>Schema is ready for the first bootstrap administrator.</span></div>
-        </section>
-
-        <section class="split-grid">
-          <div class="data-section" id="roles">
-            <div class="section-heading"><div><span class="eyebrow">AUTHORIZATION</span><h2>Roles & permissions</h2></div></div>
-            <div class="rows compact">
-              <div class="data-row"><span>system-admin</span><code>system.admin</code></div>
-              <div class="data-row"><span>Application roles</span><span class="muted">additive permission bundles</span></div>
-              <div class="data-row"><span>Deny rules</span><span class="muted">none</span></div>
-            </div>
-          </div>
-          <div class="data-section" id="clients">
-            <div class="section-heading"><div><span class="eyebrow">PROTOCOL</span><h2>Clients</h2></div></div>
-            <div class="rows compact">
-              <div class="data-row"><span>First target</span><strong>bdcmaps</strong></div>
-              <div class="data-row"><span>Flow</span><code>code + PKCE S256</code></div>
-              <div class="data-row"><span>Compatibility</span><code>groups · client_secret_post</code></div>
-            </div>
-          </div>
-        </section>
-
-        <section class="data-section" id="audit">
-          <div class="section-heading"><div><span class="eyebrow">EVIDENCE</span><h2>Audit</h2></div></div>
-          <div class="empty-row"><span>Audit events become visible when mutation services are implemented.</span><span>No credential or bearer material is ever logged.</span></div>
-        </section>
-      </main>
-    </div>
-  </div>
-</body>
-</html>
+{{define "admin.html"}}<!doctype html><html lang="en"><head>{{template "head" .}}</head><body><a class="skip-link" href="#main">Skip to content</a><div class="app-shell"><aside class="rail" aria-label="Primary navigation"><a class="rail-mark" href="/admin/" aria-label="authd administration">A</a><nav class="rail-nav"><a class="rail-item {{if eq .View "users"}}active{{end}}" href="/admin/?view=users" aria-label="Users" title="Users">U</a><a class="rail-item {{if eq .View "roles"}}active{{end}}" href="/admin/?view=roles" aria-label="Roles" title="Roles">R</a><a class="rail-item {{if eq .View "permissions"}}active{{end}}" href="/admin/?view=permissions" aria-label="Permissions" title="Permissions">P</a><a class="rail-item {{if eq .View "sessions"}}active{{end}}" href="/admin/?view=sessions" aria-label="Sessions" title="Sessions">S</a><a class="rail-item {{if eq .View "audit"}}active{{end}}" href="/admin/?view=audit" aria-label="Audit" title="Audit">E</a></nav><a class="rail-item rail-bottom" href="/account" aria-label="Your account" title="Your account">@</a></aside><div class="workspace"><header class="topbar"><div><div class="eyebrow">AUTHD / IDENTITY ADMINISTRATION</div><h1>{{if eq .View "users"}}Users{{else if eq .View "roles"}}Roles{{else if eq .View "permissions"}}Permissions{{else if eq .View "sessions"}}Sessions{{else}}Audit{{end}}</h1></div><div class="topbar-meta"><code>{{.Issuer}}</code><a href="/account">{{.Session.User.Username}}</a></div></header><main id="main" class="content">{{template "notice" .}}<section class="section-band"><div><div class="eyebrow">LOCAL IDENTITY</div><h2>Manage access once.</h2></div><p>Users, credentials, and additive roles are live. OIDC code and token issuance are not implemented in this release.</p></section><nav class="section-tabs" aria-label="Administration sections"><a href="/admin/?view=users">Users</a><a href="/admin/?view=roles">Roles</a><a href="/admin/?view=permissions">Permissions</a><a href="/admin/?view=sessions">Sessions</a><a href="/admin/?view=audit">Audit</a></nav>
+{{if eq .View "users"}}
+<section class="data-section"><div class="section-heading"><h2>Local users</h2><span class="muted small">{{len .Admin.Users}} shown</span></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>User</th><th>Email</th><th>Roles</th><th>Status</th><th>Action</th></tr></thead><tbody>{{range .Admin.Users}}<tr><td><strong>{{.Username}}</strong><small class="block muted">{{.DisplayName}}</small></td><td>{{.Email}}{{if .EmailVerified}}<small class="block good">Administrator verified</small>{{end}}</td><td>{{join .Roles ", "}}</td><td>{{if .Enabled}}Enabled{{else}}Disabled{{end}}{{if .ForcePasswordChange}}<small class="block warn">Password change required</small>{{end}}</td><td><a href="/admin/?user={{.ID}}">Edit</a></td></tr>{{else}}<tr><td colspan="5">No users.</td></tr>{{end}}</tbody></table></div></section>
+<section class="data-section"><div class="section-heading"><h2>{{if .SelectedUser}}Edit {{.SelectedUser.Username}}{{else}}Create user{{end}}</h2></div><form method="post" action="{{if .SelectedUser}}/admin/users/save{{else}}/admin/users/create{{end}}" class="form-body">{{template "csrf" .}}{{if .SelectedUser}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}">{{end}}<div class="form-grid"><label>Username<input name="username" value="{{if .SelectedUser}}{{.SelectedUser.Username}}{{end}}" maxlength="128" required autocomplete="off"></label><label>Display name<input name="display_name" value="{{if .SelectedUser}}{{.SelectedUser.DisplayName}}{{end}}" maxlength="256"></label><label>Email<input name="email" type="email" value="{{if .SelectedUser}}{{.SelectedUser.Email}}{{end}}" maxlength="254"></label>{{if not .SelectedUser}}<label>Initial password<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label>{{end}}</div><fieldset><legend>Roles</legend><div class="choices">{{range .Admin.Roles}}<label class="check"><input type="checkbox" name="roles" value="{{.ID}}" {{if $.SelectedUser}}{{if selected $.SelectedUser.RoleIDs .ID}}checked{{end}}{{end}}><span>{{.Name}}</span></label>{{end}}</div></fieldset>{{if .SelectedUser}}<label class="check"><input type="checkbox" name="enabled" {{if .SelectedUser.Enabled}}checked{{end}}><span>Account enabled</span></label><label class="check"><input type="checkbox" name="email_verified" {{if .SelectedUser.EmailVerified}}checked{{end}}><span>I have independently verified this existing email address</span></label><p class="muted small">Changing the email clears verification. Save the address first, then explicitly verify it.</p>{{end}}<label class="check"><input type="checkbox" name="force_password_change" {{if .SelectedUser}}{{if .SelectedUser.ForcePasswordChange}}checked{{end}}{{else}}checked{{end}}><span>Require password change</span></label><p class="muted small">Disabling an account or requiring a password change revokes its provider sessions and refresh grants. The final enabled administrator is protected.</p><div><button class="button button-primary">{{if .SelectedUser}}Save user{{else}}Create user{{end}}</button> <a href="/admin/?view=users">Clear selection</a></div></form></section>{{if .SelectedUser}}<section class="data-section"><div class="section-heading"><h2>Reset password</h2></div><form method="post" action="/admin/users/password" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{.SelectedUser.ID}}"><label>New password<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label><label class="check"><input type="checkbox" name="force_password_change" checked><span>Require change at next login</span></label><p class="muted small">Immediately revokes all of this user's provider sessions and refresh-token families.</p><div><button class="button button-danger">Reset password</button></div></form></section>{{end}}
+{{else if eq .View "roles"}}
+<section class="data-section"><div class="section-heading"><h2>Permission bundles</h2><span class="muted small">No inheritance or deny rules</span></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Role</th><th>Description</th><th>Permissions</th><th>Action</th></tr></thead><tbody>{{range .Admin.Roles}}<tr><td>{{.Name}}{{if .BuiltIn}}<small class="block muted">Built in</small>{{end}}</td><td>{{.Description}}</td><td>{{join .Permissions ", "}}</td><td><a href="/admin/?role={{.ID}}">Edit</a></td></tr>{{end}}</tbody></table></div></section><section class="data-section"><div class="section-heading"><h2>{{if .SelectedRole}}Edit role{{else}}Create role{{end}}</h2></div><form method="post" action="/admin/roles/save" class="form-body">{{template "csrf" .}}<input type="hidden" name="id" value="{{if .SelectedRole}}{{.SelectedRole.ID}}{{end}}"><label>Name<input name="name" value="{{if .SelectedRole}}{{.SelectedRole.Name}}{{end}}" maxlength="128" required {{if .SelectedRole}}{{if .SelectedRole.BuiltIn}}readonly{{end}}{{end}}></label><label>Description<input name="description" value="{{if .SelectedRole}}{{.SelectedRole.Description}}{{end}}" maxlength="1024"></label><fieldset><legend>Permissions</legend><div class="choices">{{range .Admin.Permissions}}<label class="check"><input type="checkbox" name="permissions" value="{{.ID}}" {{if $.SelectedRole}}{{if selected $.SelectedRole.PermissionIDs .ID}}checked{{end}}{{end}}><span>{{.Name}}</span></label>{{end}}</div></fieldset><div><button class="button button-primary">Save role</button> <a href="/admin/?view=roles">Clear selection</a></div></form></section>
+{{else if eq .View "permissions"}}
+<section class="data-section"><div class="section-heading"><h2>Permission catalog</h2></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{{range .Admin.Permissions}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td></tr>{{end}}</tbody></table></div></section><section class="data-section"><div class="section-heading"><h2>Create permission</h2></div><form method="post" action="/admin/permissions/create" class="form-body">{{template "csrf" .}}<label>Name<input name="name" placeholder="bdcmaps.network.read" required maxlength="128"></label><label>Description<input name="description" maxlength="1024"></label><div><button class="button button-primary">Create permission</button></div></form></section>
+{{else if eq .View "sessions"}}
+<section class="data-section"><div class="section-heading"><h2>Active provider sessions</h2></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>User</th><th>Authenticated</th><th>Methods</th><th>Source</th><th>Action</th></tr></thead><tbody>{{range .Admin.Sessions}}<tr><td>{{.User.Username}}</td><td>{{when .AuthTime}}</td><td>{{join .AuthMethods ", "}}</td><td>{{.IP}}<small class="block muted">{{.UserAgent}}</small></td><td><form method="post" action="/admin/sessions/revoke">{{template "csrf" $}}<input type="hidden" name="session_id" value="{{.ID}}"><button class="button">Revoke</button></form></td></tr>{{end}}</tbody></table></div></section>
+{{else}}
+<section class="data-section"><div class="section-heading"><h2>Recent audit events</h2><span class="muted small">Latest 200</span></div><div class="table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Target</th><th>Source</th></tr></thead><tbody>{{range .Admin.Events}}<tr><td>{{when .At}}</td><td><code>{{.Event}}</code></td><td>{{.Actor}}</td><td><code>{{.Target}}</code></td><td>{{.IP}}</td></tr>{{else}}<tr><td colspan="5">No events.</td></tr>{{end}}</tbody></table></div></section>
 {{end}}
+<p class="muted small">Identity beta · user, role and permission deletion and OIDC client registration are not available yet.</p></main></div></div></body></html>{{end}}
