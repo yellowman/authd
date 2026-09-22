@@ -1,4 +1,4 @@
-.PHONY: deps fmt fmt-check test race vet build verify integration offline-check run dev-db dev-db-down
+.PHONY: deps fmt fmt-check test race vet build verify integration offline-check run migrate dev-db dev-db-down
 
 deps:
 	go mod tidy
@@ -37,6 +37,9 @@ offline-check:
 
 run:
 	go run ./cmd/authd
+
+migrate:
+	go run ./cmd/authd migrate
 
 dev-db:
 	docker compose -f compose.dev.yml up -d postgres

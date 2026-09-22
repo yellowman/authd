@@ -5,16 +5,20 @@ credentials, roles, permissions, MFA, provider sessions, and OIDC once; let many
 applications consume the same identity. The first relying-party target is
 `yellowman/bdcmaps`.
 
-## v0.6 — lifecycle and operations
+## v0.7 — deployment hardening
 
-v0.6 closes the first operational lifecycle gaps on top of the v0.5 OIDC provider.
-**This is implemented source, not production qualification.** The authoring
+v0.7 adds deployment-role and failure-observability hardening on top of the v0.6
+lifecycle work and v0.5 OIDC provider. **This is implemented source, not production
+qualification.** The authoring
 environment cannot run PostgreSQL, download the selected Go 1.25 toolchain/modules,
 or run the actual private bdcmaps application. See `VALIDATION.md` for the exact
 evidence boundary.
 
 Implemented in this revision:
 
+- `authd migrate` is now the only normal executable path that performs DDL. Daemon and bootstrap startup verify the exact embedded migration manifest and fail closed on missing, stale, ahead, or altered migration history.
+- A reviewed PostgreSQL runtime-grant script supports a DML-only daemon role without schema ownership/CREATE privileges; migration/login role creation and passwords remain operator-owned.
+- Internal HTTP failures return a request reference and structured bounded error class for operator correlation without logging raw database/credential errors.
 - Soft deletion of local users with credential, MFA, role, session, authorization-code, and refresh-family teardown; the immutable identity row remains for audit/sub continuity.
 - Deletion of non-built-in roles with transactional final-administrator protection.
 - Permission editing and reference-safe deletion; `system.admin` cannot be renamed or deleted.
@@ -93,17 +97,26 @@ export AUTHD_DEVELOPMENT=true
 umask 077
 ./scripts/generate-master-key.sh > authd-master.key
 export AUTHD_MASTER_KEY_FILE="$PWD/authd-master.key"
+./bin/authd migrate
 ./bin/authd bootstrap
 ./bin/authd
 ```
 
-`authd bootstrap` applies migrations and prints a one-time 30-minute setup token
-to the invoking terminal. Open `/setup`, create the initial administrator, then
+`authd migrate` is the only normal executable path that performs schema DDL.
+`authd bootstrap` and the daemon verify that every embedded migration is present
+and fail closed when the database is behind or its migration history differs.
+`authd bootstrap` prints a one-time 30-minute setup token to the invoking terminal. Open `/setup`, create the initial administrator, then
 sign in at `/login`. Identity administration is under `/admin/`; personal
 credentials and sessions are under `/account`.
 
 Keep the master key. It encrypts TOTP seeds and OIDC signing private keys. Changing
 or losing it makes those encrypted values unreadable.
+
+For production, use separate PostgreSQL migration/owner and runtime roles. The
+runtime role needs DML but not schema ownership/CREATE privileges; see
+`deploy/postgresql/README.md` and `deploy/postgresql/runtime-grants.sql`. Run
+`authd migrate` with the migration connection before switching `DATABASE_URL` to
+the runtime login for bootstrap and the daemon.
 
 When authd is behind a reverse proxy, leave forwarded-header trust disabled unless the
 direct proxy addresses are known. Configure only those networks, for example:
@@ -164,9 +177,9 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
   clients and authorization is based on their configured scope allow-list.
 - Signing-key inventory and manual rotation are implemented; automatic rotation and
   an explicit public-key deletion/retention schedule remain.
-- Pagination, TOTP QR rendering, safe break-glass recovery, and backup/master-key
-  rotation remain. Admin edit forms carry row versions and stale concurrent saves are
-  rejected transactionally.
+- Pagination, TOTP QR rendering, safe break-glass recovery, backup/restore, and
+  master-key rotation remain. Admin edit forms carry row versions and stale concurrent
+  saves are rejected transactionally.
 - JWT access tokens intentionally remain valid until their short expiry after a
   user/session change; refresh and new authorization re-evaluate current grants.
 - Rate limits are process-local and deployments currently assume one active authd

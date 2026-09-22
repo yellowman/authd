@@ -64,3 +64,19 @@ func TestOIDCMigrationAddsDurableContinuationsAndRefreshContext(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrationManifestIsOrderedAndUnique(t *testing.T) {
+	manifest, err := migrationManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []migrationEntry{{Version: 1, Name: "001_init.sql"}, {Version: 2, Name: "002_identity_lifecycle.sql"}, {Version: 3, Name: "003_oidc_authorization.sql"}}
+	if len(manifest) != len(want) {
+		t.Fatalf("migration count %d, want %d", len(manifest), len(want))
+	}
+	for i := range want {
+		if manifest[i] != want[i] {
+			t.Fatalf("migration %d = %#v, want %#v", i, manifest[i], want[i])
+		}
+	}
+}

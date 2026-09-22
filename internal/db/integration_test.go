@@ -83,6 +83,9 @@ func postgres(t *testing.T) (*db.IdentityStore, context.Context) {
 	if err = db.Migrate(ctx, conn); err != nil {
 		t.Fatal("idempotent migration:", err)
 	}
+	if err = db.CheckSchema(ctx, conn); err != nil {
+		t.Fatal("current schema rejected:", err)
+	}
 	var n int
 	if err = conn.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 3 {
 		t.Fatalf("migration count %d: %v", n, err)
@@ -103,6 +106,16 @@ func token(t *testing.T) string {
 }
 
 var auditFixture = identity.Audit{IP: "127.0.0.1", RequestID: "integration-test"}
+
+func TestPostgresSchemaCheckRejectsMigrationHistoryDrift(t *testing.T) {
+	s, ctx := postgres(t)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE schema_migrations SET name='003_tampered.sql' WHERE version=3`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckSchema(ctx, s.DB); !errors.Is(err, db.ErrSchemaOutdated) {
+		t.Fatalf("tampered migration history accepted: %v", err)
+	}
+}
 
 func sessionFixture(t *testing.T, rec identity.LoginRecord, methods ...string) identity.Session {
 	t.Helper()

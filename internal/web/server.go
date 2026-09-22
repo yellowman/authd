@@ -37,20 +37,20 @@ type Server struct {
 }
 type clientIPContextKey struct{}
 type pageData struct {
-	Title, Issuer, Section, View, CSRF, Error, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
-	Development                                                                                                  bool
-	Session                                                                                                      identity.Session
-	Admin                                                                                                        identity.AdminData
-	Sessions                                                                                                     []identity.Session
-	SelectedUser                                                                                                 *identity.User
-	SelectedRole                                                                                                 *identity.Role
-	SelectedPermission                                                                                           *identity.Permission
-	OIDCClients                                                                                                  []oidc.Client
-	SelectedClient                                                                                               *oidc.Client
-	SigningKeys                                                                                                  []oidc.SigningKey
-	ClientSecret                                                                                                 string
-	RecoveryCodes                                                                                                []string
-	DefaultAccessTokenTTL                                                                                        int64
+	Title, Issuer, Section, View, CSRF, Error, ErrorReference, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
+	Development                                                                                                                  bool
+	Session                                                                                                                      identity.Session
+	Admin                                                                                                                        identity.AdminData
+	Sessions                                                                                                                     []identity.Session
+	SelectedUser                                                                                                                 *identity.User
+	SelectedRole                                                                                                                 *identity.Role
+	SelectedPermission                                                                                                           *identity.Permission
+	OIDCClients                                                                                                                  []oidc.Client
+	SelectedClient                                                                                                               *oidc.Client
+	SigningKeys                                                                                                                  []oidc.SigningKey
+	ClientSecret                                                                                                                 string
+	RecoveryCodes                                                                                                                []string
+	DefaultAccessTokenTTL                                                                                                        int64
 }
 
 func New(cfg config.Config, auth *identity.Service, health func(context.Context) error, providers ...*oidc.HTTP) (*Server, error) {
@@ -159,6 +159,7 @@ func (s *Server) render(w http.ResponseWriter, status int, name string, data pag
 func (s *Server) failure(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
 	message := "The request could not be completed. No success is assumed."
+	errorClass := "internal"
 	switch {
 	case errors.Is(err, identity.ErrCredentials):
 		status = 401
@@ -185,6 +186,11 @@ func (s *Server) failure(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, identity.ErrUnavailable):
 		status = 503
 		message = "Authentication is temporarily unavailable."
+		errorClass = "dependency_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		status = 503
+		message = "The operation timed out before it could complete."
+		errorClass = "deadline"
 	default:
 		var input *identity.InputError
 		if errors.As(err, &input) {
@@ -192,11 +198,20 @@ func (s *Server) failure(w http.ResponseWriter, r *http.Request, err error) {
 			message = input.Message
 		}
 	}
+	requestID := requestid.From(r.Context())
+	if requestID == "" {
+		requestID = w.Header().Get("X-Request-ID")
+	}
 	if status >= 500 {
-		slog.Error("request failed", "request_id", w.Header().Get("X-Request-ID"))
-	} // Never log raw driver/credential errors.
+		// Never log raw driver/credential errors. The bounded class plus request ID
+		// is sufficient for operator correlation without leaking DSNs, SQL, or secrets.
+		slog.Error("request failed", "request_id", requestID, "error_class", errorClass)
+	}
 	d := s.data("Request not completed")
 	d.Error = message
+	if status >= 500 {
+		d.ErrorReference = requestID
+	}
 	s.render(w, status, "message.html", d)
 }
 func (s *Server) cookieName(kind string) string {
@@ -320,7 +335,11 @@ func safeReturn(path string) string {
 }
 func auditInfo(w http.ResponseWriter, r *http.Request) identity.Audit {
 	host, _ := r.Context().Value(clientIPContextKey{}).(string)
-	return identity.Audit{IP: host, RequestID: w.Header().Get("X-Request-ID")}
+	id := requestid.From(r.Context())
+	if id == "" {
+		id = w.Header().Get("X-Request-ID")
+	}
+	return identity.Audit{IP: host, RequestID: id}
 }
 func trustedAddress(addr netip.Addr, trusted []netip.Prefix) bool {
 	for _, prefix := range trusted {

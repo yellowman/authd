@@ -17,6 +17,7 @@ import (
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/identity"
 	"github.com/yellowman/authd/internal/oidc"
+	"github.com/yellowman/authd/internal/requestid"
 )
 
 const userID = "00000000-0000-4000-8000-000000000001"
@@ -35,6 +36,7 @@ type testStore struct {
 	raw                                       string
 	adminCalls, mutationCalls, sessionCreates int
 	profileEdits                              int
+	mutationError                             error
 	revoked                                   bool
 	loginAudit                                identity.Audit
 	loginSession                              identity.Session
@@ -57,7 +59,7 @@ func (m *testStore) AdminData(context.Context, []byte) (identity.AdminData, erro
 }
 func (m *testStore) CreatePermission(context.Context, []byte, string, string, identity.Audit) error {
 	m.mutationCalls++
-	return nil
+	return m.mutationError
 }
 func (m *testStore) SavePermission(context.Context, []byte, identity.PermissionEdit, identity.Audit) error {
 	m.mutationCalls++
@@ -409,6 +411,51 @@ func TestNoSecretsInRequestLogs(t *testing.T) {
 		t.Fatal("sensitive response can be cached")
 	}
 }
+func TestInternalFailureUsesSafeClassAndRequestReference(t *testing.T) {
+	s, h, m := fixture(t, true)
+	m.mutationError = errors.New("postgres://user:SECRET@db/internal")
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(old)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "POST", "/admin/permissions/create", url.Values{"name": {"app.read"}, "csrf_token": {s.auth.CSRF(m.raw, "session")}}, true))
+	requestID := w.Header().Get("X-Request-ID")
+	if w.Code != http.StatusInternalServerError || requestID == "" || !strings.Contains(w.Body.String(), requestID) {
+		t.Fatalf("internal failure lacks correlation reference: code=%d id=%q body=%s", w.Code, requestID, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "SECRET") || strings.Contains(logs.String(), "SECRET") || strings.Contains(logs.String(), "postgres://") {
+		t.Fatal("raw internal error leaked")
+	}
+	if !strings.Contains(logs.String(), "error_class=internal") || !strings.Contains(logs.String(), requestID) {
+		t.Fatalf("safe internal classification missing: %s", logs.String())
+	}
+}
+
+func TestFailureClassifiesUnavailableAndDeadlineWithoutRawError(t *testing.T) {
+	s, _, _ := fixture(t, false)
+	for _, tc := range []struct {
+		err   error
+		class string
+	}{
+		{identity.ErrUnavailable, "dependency_unavailable"},
+		{context.DeadlineExceeded, "deadline"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "https://auth.example.test/account", nil)
+		id := "test-request-reference"
+		r = r.WithContext(requestid.With(r.Context(), id))
+		w := httptest.NewRecorder()
+		var logs bytes.Buffer
+		old := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		s.failure(w, r, tc.err)
+		slog.SetDefault(old)
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(logs.String(), "error_class="+tc.class) || !strings.Contains(w.Body.String(), id) {
+			t.Fatalf("classification %s failed: code=%d logs=%s body=%s", tc.class, w.Code, logs.String(), w.Body.String())
+		}
+	}
+}
+
 func TestHealthDoesNotLeakBackendFailure(t *testing.T) {
 	s, _, m := fixture(t, false)
 	s.healthCheck = func(context.Context) error { return errors.New("postgres://user:SECRET@host") }

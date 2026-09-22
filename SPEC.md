@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.6
+## Specification v0.7
 
-Status: binding product design. v0.6 implements the local identity/admin slice, the central OIDC provider path, and the first lifecycle/operations controls. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design. v0.7 implements the local identity/admin slice, the central OIDC provider path, lifecycle/operations controls, and the explicit migration/runtime PostgreSQL role boundary. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -1507,7 +1507,9 @@ audit_events
 schema_migrations
 ```
 
-Migrations are embedded in the executable and applied in filename/version order under a transaction-scoped PostgreSQL advisory lock. Migration execution and version records commit together; pooled connections MUST NOT retain a migration lock after cancellation or return.
+Migrations are embedded in the executable and applied only by the explicit `authd migrate` command, in filename/version order under a transaction-scoped PostgreSQL advisory lock. Migration execution and version records commit together; pooled connections MUST NOT retain a migration lock after cancellation or return. Normal daemon startup and `authd bootstrap` perform no DDL: they verify that the recorded migration versions/names exactly match the embedded migration manifest and fail closed if the schema is absent, behind, ahead, or has altered history.
+
+Production deployments SHOULD use a migration/owner PostgreSQL role for `authd migrate` and a separate DML-only runtime role for `authd` and `authd bootstrap`. The runtime role requires database connect, schema usage, table DML, and sequence usage but not table ownership or schema `CREATE`. Future migration-owner objects MUST preserve the runtime grants through reviewed default privileges. The repository provides a grant script but deliberately does not create LOGIN roles or manage database passwords.
 
 No external migration framework is required initially.
 
@@ -2145,7 +2147,7 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.6 implementation limits and evidence
+# 45. v0.7 implementation limits and evidence
 
 This revision implements the identity/bootstrap/session/MFA/admin source slice and
 the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
@@ -2177,7 +2179,7 @@ The application requires live PostgreSQL for authentication and current grants;
 it does not fall back to cached allows after a database failure.
 
 The initial admin editor has an explicit 200-record catalog ceiling and fails
-closed instead of rendering an incomplete assignment list. v0.6 implements user,
+closed instead of rendering an incomplete assignment list. v0.7 implements user,
 non-built-in-role, unreferenced-permission, and OIDC-client deletion; permission
 editing; administrative MFA reset; recent-MFA recovery-code regeneration; signing-key
 inventory/rotation; periodic expiry/audit cleanup; and row-version-based optimistic
@@ -2193,7 +2195,10 @@ Pagination, an explicit signing-key deletion/retention schedule, safe break-glas
 recovery, backup/master-key rotation qualification, and further operation-specific
 audit detail remain TODO items. Trusted-proxy source-IP
 resolution is implemented through an explicit CIDR allow-list; rate limiting remains
-process-local and therefore single-instance.
+process-local and therefore single-instance. Normal daemon/bootstrap startup performs
+no DDL and verifies the exact embedded migration manifest; `authd migrate` is the
+explicit schema-owner path. Internal HTTP failures expose a request reference and log
+only a bounded error class rather than the raw underlying driver error.
 Only implemented local-provider sessions are revoked by local logout. Existing
 relying-party application sessions are outside that operation.
 

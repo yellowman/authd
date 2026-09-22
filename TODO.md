@@ -1,4 +1,4 @@
-# Implementation sequence — v0.6
+# Implementation sequence — v0.7
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -60,8 +60,9 @@ actual bdcmaps login remain the first external gates.
 - [ ] TOTP QR display.
 - [x] Expired authorization/session/token/enrollment cleanup and bounded audit retention.
 - [x] Explicit trusted-proxy IP parsing and deployment rate-limit guidance.
-- [ ] Operator-visible internal error classification without leaking secrets.
-- [ ] Backup/restore, master-key rotation, dedicated migration/runtime DB roles.
+- [x] Operator-visible internal error classification plus request correlation without leaking raw errors.
+- [x] Explicit migrate command plus dedicated migration/runtime PostgreSQL role boundary.
+- [ ] Backup/restore and master-key rotation.
 - [ ] Dependency/vulnerability checks.
 
 ## Later, only from concrete need

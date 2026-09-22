@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7 — deployment hardening
+
+Separated schema ownership from normal runtime: `authd migrate` is now the explicit DDL path, while daemon and bootstrap startup only verify the exact embedded migration manifest and fail closed on absent, stale, ahead, or altered history. Added a PostgreSQL runtime-grant script/default-privilege recipe so production can use a DML-only authd role without schema ownership or CREATE rights.
+
+Added safe internal failure observability. HTTP 5xx responses carry their request reference; structured logs emit only a bounded error class and request ID rather than raw driver/credential errors. Added regression coverage for secret-bearing internal errors, dependency-unavailable/deadline classification, migration manifest ordering, and real-PostgreSQL source coverage for migration-history drift.
+
+The v0.6 lifecycle controls remain unchanged. Full Go 1.25/real-pgx/PostgreSQL execution and actual bdcmaps interoperability remain external qualification gates.
+
 ## v0.6 — lifecycle and operations
 
 Completed the first destructive/maintenance control-plane slice: soft user deletion with security-state teardown and final-admin protection; non-built-in role deletion; permission editing and reference-safe deletion; administrative MFA reset; recent-MFA-only recovery-code regeneration; destructive OIDC-client deletion; signing-key inventory/rotation in the admin UI; and periodic expiry/audit cleanup.
