@@ -2407,3 +2407,40 @@ The separate browser gate exercises native submission without supplying syntheti
 Origin headers. It is distinct from HTTP unit tests and real database/RP gates.
 
 Reference: Fetch Standard, “append a request Origin header”, and W3C Referrer Policy.
+
+
+# 47. Documentation portal and navigation (v0.9.4)
+
+Administration starts with the generic `docs/ADDING_AN_APP.md` workflow, rendered
+from its original Markdown. App-specific integration profiles, including the
+verified first bdcmaps integration, MUST remain separate from that landing text.
+The guide explains client registration, callback/issuer values, identity-only
+versus role-name versus permission-scope use, role assignment, client secrets,
+app-side configuration and an actual end-to-end login test.
+
+`GET /admin/docs` lists/searches the release documentation. `?doc=<catalog name>`
+selects a rendered Markdown document. `GET /admin/docs/raw?doc=<catalog name>`
+returns its source or linked embedded evidence as plain text. All three surfaces
+MUST use the same live `system.admin` authorization as the admin UI and retain
+no-store/security headers. The portal MUST NOT expose runtime files, credentials,
+source code, repository internals, arbitrary file paths or remote URL fetching.
+
+The catalog includes product Markdown at the repository root, under `docs/`, and
+native-deployment README files. Content is embedded in the binary from those
+original files and rendered once into an immutable catalog. Tests MUST detect a
+product Markdown file absent from the catalog. Tables, fenced code, nested lists,
+reference links and heading navigation must remain readable. Raw HTML must be
+escaped and links restricted to safe schemes or known local destinations. Images
+must not load remote resources automatically. Search and navigation work without
+JavaScript or a CDN. Changes require rebuilding/restarting the binary, not a
+migration or mutable online wiki.
+
+Sidebar navigation MUST use local inline outline SVGs, accessible link names and
+aria-current selection. Normal, hover and selected links have no shaded button
+backgrounds or shadows. Selection uses an edge line; focus remains visible. Short
+viewports must retain access to every destination and the account link.
+
+An operator-reported full application login counts as completed real RP integration
+for that named app. It MUST NOT be relabeled as provider-only testing, nor be
+expanded into unreported conformance, MFA, negative-access, recovery or throughput
+qualification. Validation records retain the evidence source and scope.

@@ -1,3 +1,101 @@
+# Validation record — v0.9.4 documentation portal and navigation
+
+Base: `8ef6d03` (v0.9.3). This release adds an authenticated documentation portal,
+generic application onboarding, explanatory field labels and unshaded SVG
+navigation. It does not change OIDC grant handling, identity authority, the
+database, listener configuration or native service definitions.
+
+## First real application — bdcmaps: PASS
+
+**One complete end-to-end application login is now verified.** On 2026-09-22 the
+operator confirmed a successful full login through the actual BDC Maps
+application. This closes the first real relying-party callback/login gate; it is
+not just an authd token test or an in-memory client fixture.
+
+The [verbatim report](docs/validation/v0.9.3/external-bdcmaps-report.md) is retained.
+It arrived after the v0.9.3 delivery; no exact deployed commit or raw command log
+was supplied. It does not imply that the new v0.9.4 documentation UI was deployed
+there, or that every MFA, logout, role, proxy-hardening or recovery path was tested.
+
+| Scope | Current evidence |
+|---|---|
+| First actual relying application: bdcmaps callback and full app login | **PASS — operator-reported, completed** |
+| v0.9.0 OpenBSD/PostgreSQL/live-provider qualification | **PASS — previously reported**, retained below |
+| Other applications / independent OpenID conformance certification | Not established by either report |
+| Native service installation, live MFA, recovery/restore and all proxy security scenarios | Not inferred from successful app login; qualify separately |
+
+## v0.9.4 checks performed here
+
+The source-authoring host runs Linux/amd64 and Go 1.23.2. The production module
+still requires Go 1.26.0. The following are local code/fixture checks, not a new
+production deployment or another real BDC login.
+
+| Check | Result and boundary |
+|---|---|
+| Documentation source coverage | PASS: every product Markdown file in the root, `docs/` and the three native deployment README files is embedded, rendered and source-identical |
+| Generic onboarding | PASS: Start here renders `docs/ADDING_AN_APP.md`; no BDC-specific content in that article |
+| Protected catalog, rendered pages and raw sources | PASS: anonymous/non-admin refusal, live administrator checks, finite catalog selection, traversal/duplicate/oversized-query refusal, no full admin catalog scan |
+| Markdown rendering | PASS: headings, unique anchors, tables, references, nested lists, fenced code, escaping, dangerous-URL refusal, no executable HTML or auto-fetched images, concurrent cached reads |
+| SVG navigation | PASS: every rail destination has a named link and local decorative SVG; one `aria-current` destination; no letter substitutes or shaded normal/hover/selected backgrounds; visible keyboard focus |
+| Component tests with race detector and vet | PASS with the explicit partial dependency setup below; actual root/docs/config/crypto/identity/listener/db/OIDC/TOTP/web code |
+| Password parser / SQL integration-body typecheck | PASS: parser only, not Argon2 derivation; SQL bodies compile but are not executed |
+| Markdown fuzzing | PASS: 92,570 executions with two workers in the recorded run; not a proof of absence of all parser bugs |
+| Chromium layout/interaction checks | PASS: 34 desktop/mobile/short-height cases from actual Go-rendered HTML/CSS, including searchable catalog, long Markdown, field descriptions and reachable sidebar controls |
+| Native browser form navigation | BLOCKED: managed Chromium returns `ERR_BLOCKED_BY_ADMINISTRATOR` before the first form submission. The gate fails, rather than claiming a skipped pass |
+| Formatting, environment parity, shell syntax, static systemd validation and staged install | PASS: package tests use `/bin/true` only as a distributable binary fixture, never an alternate authd server |
+| Protocol/database/dependency/listener/service invariance | PASS: unchanged from v0.9.3; no new migration or credential operation |
+| Full Go 1.26+ executable and pinned module graph | NOT RUN on this Go 1.23.2 host; a normal supported-toolchain build remains required |
+
+### Exact parser/dependency boundary
+
+The documentation parser is unmodified `rsc.io/markdown` source at
+`v0.0.0-20240306144322-0bf8f97ee8ef`, bundled with Go 1.23.2, now isolated under
+`internal/thirdparty/markdown`. Its source hashes and license are retained. The
+production module files are unchanged and use the existing `golang.org/x/text`
+v0.42.0 for Unicode reference-label folding; see [THIRD_PARTY.md](THIRD_PARTY.md).
+
+For this host's partial checks, a temporary modfile explicitly replaces `x/text`
+with the **real v0.16.0 source snapshot bundled in the installed Go toolchain**.
+This is neither a fabricated module nor validation of production `x/text` v0.42.0.
+The script prints the substitution. No pgx or Argon2 stand-in is used; the full
+executable and real PostgreSQL integration are not run by this partial gate.
+Do not treat these results as a pass of `make verify` with the pinned modules.
+
+The layout-only browser witness fetches actual fixture HTML through Python, then
+renders it with Chromium `set_content` and the real stylesheet. It checks layout,
+SVG state, focus, heading targets and short-viewport reachability. It does not
+prove native navigation, Origin generation, cookies, database persistence or OIDC
+interoperability. The operator's separate successful BDC login remains real
+application evidence; it is not replaced by the layout fixture.
+
+### Retained v0.9.4 evidence
+
+Trailing whitespace is normalized in retained logs; results and counts are unchanged.
+
+- [Component/race/vet/typecheck gate](docs/validation/v0.9.4/component-tests.log).
+- [Markdown fuzzing](docs/validation/v0.9.4/fuzz.log).
+- [34 browser layout cases](docs/validation/v0.9.4/browser-layout.log).
+- [Browser coverage summary](docs/validation/v0.9.4/layout-browser.json).
+- [Native browser refusal](docs/validation/v0.9.4/native-browser.log).
+- [Static, source-integrity, invariance and package checks](docs/validation/v0.9.4/static-checks.log).
+
+## Updating
+
+Build with the normal Go 1.26+ dependency graph, install and restart authd, then
+reload open pages. There is **no migration, rebootstrap, key or secret rotation,
+callback update or Unix-socket change**. Application credentials and field POST
+names retain their existing meanings. The documentation is compiled into the
+binary from the original Markdown; editing it requires rebuilding, not editing a
+second HTML help copy.
+
+---
+
+# Archived evidence — earlier releases
+
+The records below describe what was known when each earlier release shipped.
+Their older “not exercised” BDC entries are historical, not the current status:
+the current first-app PASS above supersedes them.
+
 # Validation record — v0.9.3 operator interface and native-form fix
 
 Base: `c3a0cab` (the delivered v0.9.2 archive used for this update). The user

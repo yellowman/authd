@@ -1,0 +1,14 @@
+{{define "documentation"}}
+{{if .Document}}
+<div class="doc-toolbar"><a href="/admin/docs">All documentation · {{.DocumentCount}} documents</a><a href="/admin/docs/raw?doc={{.Document.Path}}">Markdown source</a></div>
+<div class="doc-layout">
+<article class="markdown-body" aria-label="{{.Document.Title}}">{{.Document.Body}}</article>
+<aside class="doc-aside" aria-label="Document navigation"><details class="doc-toc" open><summary>On this page</summary><nav aria-label="On this page">{{range .Document.TOC}}{{if le .Level 3}}<a class="toc-level-{{.Level}}" href="#{{.ID}}">{{.Text}}</a>{{end}}{{end}}</nav></details><p class="field-help">Source: <code>{{.Document.Path}}</code><br>Read-only documentation shipped with this release.</p></aside>
+</div>
+{{else}}
+<section class="guide-intro"><h2>Documentation library</h2><p>Setup, day-to-day administration, integration profiles, design and validation. Select a document to read its Markdown here.</p><p><a href="/admin/?view=guide">Start with adding an app to authd</a></p></section>
+<form method="get" action="/admin/docs" class="doc-search"><label for="doc-search">Search documentation<input id="doc-search" name="q" type="search" maxlength="200" value="{{.DocumentQuery}}" placeholder="Try roles, Unix socket, or refresh tokens"></label><button class="button" type="submit">Search</button>{{if .DocumentQuery}}<a href="/admin/docs">Clear search</a>{{end}}</form>
+<p class="field-help">{{.DocumentCount}} documents in this release. Search matches titles, paths and contents.</p>
+<div class="doc-catalog">{{range .DocumentGroups}}<section class="doc-group"><h2>{{.Name}}</h2>{{range .Entries}}<a class="doc-entry" href="{{.URL}}"><strong>{{.Title}}</strong><span>{{.Description}}</span><code>{{.Path}}</code></a>{{end}}</section>{{else}}<p role="status">No documents match this search. Try a shorter term or clear the search.</p>{{end}}</div>
+{{end}}
+{{end}}

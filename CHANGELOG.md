@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.4 — generic documentation portal and unshaded SVG navigation
+
+Start here renders the original adding-an-app Markdown rather than a BDC-specific
+HTML walkthrough. The authenticated Documentation catalog provides every product
+Markdown file with full-text search, heading links, relative links, and original
+source/evidence access. It uses one embedded read-only catalog and an isolated
+upstream parser with allow-listed HTML rendering; no remote script or arbitrary
+file/URL rendering is added. The original guides are installed as documentation.
+
+Replaced sidebar letters with accessible inline SVGs and removed normal/hover/
+active shading. Clearer generic form labels and a field reference explain what
+to enter without changing form names, validation, or authorization behavior.
+Recorded the operator-reported **complete actual bdcmaps login** as the first
+verified relying app; independent conformance and unreported scenarios remain
+separate. No database, OIDC, identity, cryptography, listener, module lock or
+service-definition changes. Build/install/restart; no migration or secret changes.
+
 ## v0.9.3 — Native forms and operator guidance (2026-09-22)
 
 Incorporated the user-supplied Referrer-Policy fix in both web and OIDC

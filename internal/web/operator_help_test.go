@@ -34,7 +34,7 @@ func TestOperatorGuideUsesAdminAuthorization(t *testing.T) {
 			if m.adminCalls != 0 {
 				t.Error("static guide scanned the full admin catalog")
 			}
-			for _, text := range []string{"Start here", "First BDC Maps login", "What the pieces mean", "When something fails", "no separate per-client allowed-users list", "system-admin"} {
+			for _, text := range []string{"Start here", "Adding an app to authd", "Decide how the app will use access information", "When something fails", "no separate per-client allowed-users list", "system-admin"} {
 				if !strings.Contains(w.Body.String(), text) {
 					t.Errorf("guide missing %q", text)
 				}
@@ -162,11 +162,12 @@ func TestGuideLinksPointToRealSections(t *testing.T) {
 	d.View = "guide"
 	d.Session = m.session
 	d.Admin = m.snapshot
+	s.startDocument(&d)
 	var b bytes.Buffer
 	if err := s.templates.ExecuteTemplate(&b, "admin.html", d); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"model", "bdc", "troubleshooting"} {
+	for _, id := range []string{"doc-1-decide-how-the-app-will-use-access-information", "doc-4-register-the-application", "doc-when-something-fails"} {
 		if !strings.Contains(b.String(), `id="`+id+`"`) {
 			t.Errorf("missing guide anchor %s", id)
 		}

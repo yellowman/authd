@@ -71,14 +71,22 @@ Follow `DESIGN_LANGUAGE.md`:
 
 Every security invariant gets a failing regression witness before the code is
 considered complete. The bdcmaps compatibility profile in
-`docs/BDCMAPS_INTEGRATION.md` is the first real end-to-end integration target.
+`docs/BDCMAPS_INTEGRATION.md` is the first externally verified real application
+login. Keep that evidence distinct from unit fixtures and untested scenarios.
 
 ## Operator interface and native forms
 
-Keep OPERATOR_GUIDE.md, the embedded Start here page and actual field behavior in
-agreement. Explain scope allow-lists versus grants and preserve the distinction
+Start here renders docs/ADDING_AN_APP.md. Keep original Markdown and actual
+field behavior in agreement; do not add a separate HTML guide. All product
+Markdown belongs in the authenticated documentation catalog. App-specific
+profiles are separate from generic guidance. Explain scope allow-lists versus grants and preserve the distinction
 between authd administration and application-local membership. Do not call an
 application connected simply because a client row exists. Follow
 docs/BROWSER_TESTS.md when changing form/security-header behavior: manually
 supplied Origin headers and layout-only screenshots do not prove native browser
 submission works. Never relax CSRF/origin validation to make a browser test pass.
+
+Documentation parser source is isolated under internal/thirdparty/markdown with
+its upstream license/version. Do not add another parser/framework or hand-roll
+Markdown grammar. The allow-list HTML renderer owns link/HTML safety. Update
+root manual_test.go coverage when adding a new documentation source directory.

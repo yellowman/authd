@@ -59,9 +59,13 @@ Desktop administration uses a slim left icon/text rail and one primary work surf
 └──────────────┴──────────────────────────────────────────────┘
 ```
 
-Avoid a dashboard home full of metric cards. The admin landing page should be a compact operational summary and direct links to the objects that need attention.
+Avoid a dashboard home full of metric cards. The admin landing page is a generic
+adding-an-app procedure with links to the relevant controls and documentation
+portal, not an operational-summary dashboard.
 
-On small screens the rail becomes a top bar plus a simple navigation drawer.
+On small screens retain the slim rail with its own vertical scrolling area. Keep
+the mark and account link reachable; section text links provide a labeled
+alternative to icon navigation.
 
 ## Rows before cards
 
@@ -271,8 +275,8 @@ release-history paragraph or an empty database table. Every section explains its
 object, what editing it changes, and the next action. Each ambiguous field has a
 visible description; a placeholder or a tooltip alone is not a description.
 
-Client scopes must distinguish allowed from requested from granted. The BDC
-role-mapping path must not imply that the operator needs a new permission catalog.
+Client scopes must distinguish allowed from requested from granted. A role-name
+mapping must not imply that the operator needs a new permission catalog.
 A user's subject, client connection details, and next application-side steps are
 visible where needed. A one-time secret reveal states who receives the secret and
 where it belongs; secrets do not appear in saved connection summaries.
@@ -286,3 +290,26 @@ Guidance uses existing section bands, rows, field help, and ordinary links. No
 forced tour, new frontend dependency, auto-provisioning shortcut, or policy wizard
 is needed. Verify both 1440px and 390px layouts and native browser form submission,
 not only HTTP requests with test-injected Origin headers.
+
+## Icon rail and documentation portal
+
+Sidebar items MUST have transparent backgrounds in normal, hover, pressed and
+selected states. Do not reintroduce shaded tiles, rounded boxes or inset shadows.
+Use currentColor outline SVGs on a consistent 24-unit viewBox, with 1.6-unit strokes;
+render at 22px inside 40px hit areas. Do not use letters, emoji, icon fonts or
+external icon requests. Decorative SVGs are aria-hidden and unfocusable; the link
+owns its visible-tooltip/accessibility name. aria-current and a narrow edge line
+identify selection. Keyboard focus remains visibly outlined.
+
+Start here MUST begin with the generic adding-an-app Markdown workflow. It is not
+a BDC-specific onboarding page, a release summary or an automated readiness report.
+A separate Documentation rail destination exposes the complete product Markdown
+catalog, with search, table of contents and original-source access. Render docs
+from the original embedded files, not hand-maintained HTML copies. App-specific
+profiles stay under Connect applications.
+
+Keep reading layouts quiet: text and hairlines, no document cards, no remote
+fonts or scripts. Code and tables scroll within the reading column. Test long
+specs and small/short viewports as well as the default guide. Evidence pages must
+say when a real application has passed without implying protocol certification or
+that every client row represents a tested integration.

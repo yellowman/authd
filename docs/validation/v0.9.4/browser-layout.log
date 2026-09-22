@@ -1,0 +1,41 @@
+=== RUN   TestBrowserOperatorLayout
+2026/09/22 22:31:41 INFO request id=mLltbV982jmxuok2IjxUew method=GET duration_ms=11
+2026/09/22 22:31:41 INFO request id=HhzU4sRcln2KhqISJBTbbQ method=GET duration_ms=3
+2026/09/22 22:31:41 INFO request id=iXi_yL4v0NG7dWBOn6noRQ method=GET duration_ms=1
+2026/09/22 22:31:41 INFO request id=2r6t5oyFwE7AtG0nCEv3pA method=GET duration_ms=1
+2026/09/22 22:31:42 INFO request id=79HSo-LuYkQrfWZ3I6QGPg method=GET duration_ms=1
+2026/09/22 22:31:42 INFO request id=iiGg9HGjEklcCzD8oey9cQ method=GET duration_ms=2
+2026/09/22 22:31:42 INFO request id=Qw2uHYPHxsCFLc_DgoHD6A method=GET duration_ms=1
+2026/09/22 22:31:42 INFO request id=OLkI0A5tS6WZunteGqdnQQ method=GET duration_ms=1
+2026/09/22 22:31:43 INFO request id=GI4dwkqeo0pHhK77mWMKKQ method=GET duration_ms=2
+2026/09/22 22:31:43 INFO request id=Pgysg54a-pPcpFI3vX-Jog method=GET duration_ms=2
+2026/09/22 22:31:43 INFO request id=KIyYsqgn9-JIa9ugKwwf2Q method=GET duration_ms=2
+2026/09/22 22:31:44 INFO request id=z57oSgxPV9hmeh8uF0yvpw method=GET duration_ms=6
+2026/09/22 22:31:44 INFO request id=Zk4bMPtcp-gVKZ3-ZzJYjw method=GET duration_ms=2
+2026/09/22 22:31:44 INFO request id=TFXcBhCP76XFCLyc1EDwSg method=GET duration_ms=2
+2026/09/22 22:31:45 INFO request id=bKFkMrjbWJzxzpGABaQZ4Q method=GET duration_ms=1
+2026/09/22 22:31:45 INFO request id=ycapl4D9seL4eHDssEz9Fg method=GET duration_ms=0
+2026/09/22 22:31:45 INFO request id=kdEPS_CElOAaUU_VOGDbOg method=GET duration_ms=0
+2026/09/22 22:31:45 INFO request id=2FERr6PlNVcOEKMvPYhl8Q method=GET duration_ms=1
+2026/09/22 22:31:45 INFO request id=VafJGO_xjHeJ3pvlUjnftg method=GET duration_ms=1
+2026/09/22 22:31:45 INFO request id=eM7l8CdPx-Q9aeSMsh-ylA method=GET duration_ms=1
+2026/09/22 22:31:46 INFO request id=m9gkZ5wqavIq3lphqL6ydw method=GET duration_ms=1
+2026/09/22 22:31:46 INFO request id=G_DwbripDSrKBk0FIE1YAw method=GET duration_ms=2
+2026/09/22 22:31:46 INFO request id=mKARMKKMDmA56rHt03eZwQ method=GET duration_ms=1
+2026/09/22 22:31:46 INFO request id=CpLAXqT16NTSF35-5VcYNQ method=GET duration_ms=1
+2026/09/22 22:31:47 INFO request id=tPY9oWG_wFEdMmvoyOPXMA method=GET duration_ms=1
+2026/09/22 22:31:47 INFO request id=hosUpyiu4nNEByT2vDMoPA method=GET duration_ms=2
+2026/09/22 22:31:47 INFO request id=cS3A8yDuPrx2BVkMcSW3Hw method=GET duration_ms=1
+2026/09/22 22:31:47 INFO request id=H9gES0QpweHE56EoTqRGPA method=GET duration_ms=9
+2026/09/22 22:31:48 INFO request id=PsMlW5PJjhdxXo9_KIiQrw method=GET duration_ms=2
+2026/09/22 22:31:48 INFO request id=wbnUMcB186i3rRm1tgnMMA method=GET duration_ms=2
+2026/09/22 22:31:48 INFO request id=KKpjRlJjxQvFvcpQ7JfVjw method=GET duration_ms=0
+2026/09/22 22:31:48 INFO request id=xumPyXAIMhqSQmLy2WKakQ method=GET duration_ms=0
+2026/09/22 22:31:49 INFO request id=XNxVACQbHGeYWxPiyS-MpQ method=GET duration_ms=0
+2026/09/22 22:31:49 INFO request id=sjjyIJwk-QMe2pUob_ZNgg method=GET duration_ms=2
+2026/09/22 22:31:49 INFO request id=V8hBdChLhBRhwmSW53szIA method=GET duration_ms=5
+    browser_forms_test.go:63: PASS rendered layout only: actual templates/CSS; no native form or browser network qualification
+
+--- PASS: TestBrowserOperatorLayout (10.23s)
+PASS
+ok  	github.com/yellowman/authd/internal/web	11.258s

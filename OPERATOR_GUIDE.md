@@ -10,7 +10,7 @@ to add an application or a person.
 
 You are setting up a shared sign-in service, not a new copy of each application.
 
-A person has an account in authd. An application, such as BDC Maps, has a **client
+A person has an account in authd. An application, such as an inventory system, has a **client
 registration** in authd. The application sends the person to authd to sign in and
 then accepts the result. Their password stays with authd. The application still
 controls which of its own records and features the person may use.
@@ -18,11 +18,10 @@ controls which of its own records and features the person may use.
 The normal path is:
 
 ```text
-Open BDC Maps → choose sign in → authenticate at authd → return to BDC Maps
+Open the app → choose sign in → authenticate at authd → return to the app
 ```
 
-Opening authd directly takes you to your **Account** page. It does not launch BDC
-Maps or configure BDC automatically. Administrators also see **Administration**;
+Opening authd directly takes you to your **Account** page. It does not launch or configure another app automatically. Administrators also see **Administration**;
 its **Start here** page describes the first-client workflow.
 
 There is no app launcher, directory synchronization, customer membership engine,
@@ -43,7 +42,7 @@ or RADIUS/TACACS listener in this release.
 | Subject (`sub`) | The user's stable authd identifier, paired with the issuer. | Their email, username, or permission level. |
 
 `system-admin` is the built-in role for administering **authd**; it contains
-`system.admin`. It does not automatically make the person a BDC administrator.
+`system.admin`. It does not automatically make the person an application administrator.
 PostgreSQL's `postgres`, `authd_owner`, and `authd_runtime` roles are a third,
 separate concept used during installation, not in the Users screen.
 
@@ -52,7 +51,7 @@ separate concept used during installation, not in the Users screen.
 | Secret | Who uses it | What to do with it |
 |---|---|---|
 | A person's password | The person signing in at authd. | Give an initial password through a trusted channel; require a change. |
-| Client secret | The application's backend, authenticating to authd. | Put it in that application's protected configuration. For BDC: `OIDC_CLIENT_SECRET`. |
+| Client secret | The application's backend, authenticating to authd. | Put it in that application's protected configuration. |
 | Master key | The authd daemon decrypting stored TOTP/signing-key material. | Keep it in the installed key file and back it up with the database. Never give it to a client. |
 | PostgreSQL runtime password | authd connecting to PostgreSQL. | Keep it in the runtime pgpass file, not an OIDC client field. |
 
@@ -71,96 +70,23 @@ After creation, sign in at `/login` and open **Administration → Start here**.
 Initial setup closes permanently; subsequent people are created in **Users**.
 Deleting accounts does not reopen setup. Do not rebootstrap during an upgrade.
 
-## 4. Connect BDC Maps first
+## 4. Add an application
 
-This is the **group-mapping** integration. You do not need to create permission
-strings to get the first BDC login working. The full two-sided settings and
-fresh-BDC bootstrap notes are in [BDCMAPS_INTEGRATION.md](docs/BDCMAPS_INTEGRATION.md).
+Follow [Adding an app to authd](docs/ADDING_AN_APP.md). It walks through choosing
+identity-only, role-name mapping or permission scopes; creating roles and users;
+registering the client; copying connection details; and testing from the app.
+You only configure the access model that the app actually implements.
 
-### In authd: roles, a person, and an application
-
-In **Roles**, create these names exactly:
-
-```text
-bdcmaps-administrator
-bdcmaps-reviewer
-bdcmaps-planner
-bdcmaps-viewer
-```
-
-Leave their permission checkboxes empty for this integration. BDC already knows
-what its own administrator/reviewer/planner/viewer roles mean; it will map the
-incoming group names to those roles. Save the role, then go to **Users** to assign
-it. Merely creating a role does not give it to anybody.
-
-In **Users**, create or edit a test person, enter their email, and assign the
-intended BDC role. BDC's shipped integration profile requires an email claim.
-Do not give an ordinary BDC user `system-admin`. When **Require password change**
-is selected, they must change the initial password on authd's Account page first,
-then restart sign-in from BDC. There is no invitation email sent automatically.
-
-In **Clients**, register:
-
-| Field | First BDC connection |
-|---|---|
-| Client ID | `bdcmaps` |
-| Name | `BDC Maps` |
-| Type | Confidential |
-| Access token lifetime | 300 seconds |
-| Redirect URIs | The exact BDC `/auth/callback` URL, one URL per line |
-| Identity scopes | `openid`, `profile`, `email`, `groups` |
-| Application permissions | None for this group-mapping profile |
-| Client enabled | On |
-| Require MFA | Off only for an initial connectivity test; enroll users and enable it for the intended security policy |
-| Allow refresh tokens / `offline_access` | Off for the first connection |
-| Post-logout redirect URIs | Empty unless BDC is configured to use provider logout |
-
-For the BDC deployment you identified as `maps.ykwc.com`, the callback is
-`https://maps.ykwc.com/auth/callback`. That is a deployment-specific example, **not
-a claim that its current callback or proxy has been tested**. Another BDC origin
-needs its own exact registration; a trailing slash or different hostname matters.
-
-After **Register client**, copy the secret once into BDC's `OIDC_CLIENT_SECRET`.
-The page also shows **Copy into BDC Maps** with the saved issuer, client ID,
-allowed scopes and callbacks. Those values remain available when you edit the
-client; the secret does not. Copy the secret before leaving the reveal page.
-
-### In BDC: tell it to use authd
-
-Configure BDC with the same issuer, client ID and callback. Request
-`openid profile email groups`, set its group-claim name to `groups`, and map each
-of the four authd role names to the corresponding BDC group list.
-
-A **fresh BDC installation** may need its own installer procedure before its admin
-UI can be reached. The shipped profile points to BDC's
-`deploy/production/bootstrap-oidc.sql`: it configures the first provider and
-subject-bound administrator. Edit the authd user to find the exact issuer and
-subject for that linking operation. Do not guess a subject from an email.
-
-An **existing BDC installation** uses its OIDC administration settings and an
-explicit, reviewed account-linking/provisioning procedure. Preserve existing data
-ownership; matching emails alone are not permission to merge identities.
-
-BDC's auto-provisioning and default-role settings still matter. Missing or
-unmatched group names are not necessarily a login denial: BDC may fall back to
-its configured default role. Do not turn on unrestricted auto-provisioning and
-assume the role names in authd form an application admission list.
-
-### Prove the connection
-
-Start from BDC in a fresh browser session. Expect a redirect to authd, a successful
-sign-in, and a return through BDC's callback. Verify the person's role **inside
-BDC**, first with an administrator and then with a restricted user. A successful
-authd `/login`, discovery response, or token test does not prove the actual BDC
-callback and group mapping work.
-
-Changing a role here does not necessarily update an existing BDC cookie. End the
-BDC session and start a new login when checking role changes.
+Administration → Start here renders that same Markdown. Documentation provides
+all shipped guides, searchable by name and content, with a table of contents and
+original Markdown source. App-specific profiles are separate documents under
+Connect applications. See [Field reference](docs/FIELD_REFERENCE.md) when a form
+label needs more explanation.
 
 ## 5. When do I use permissions?
 
 Use them when an application actually checks OAuth permission scopes. This is a
-different integration path from BDC's current group mapping.
+different integration path from a role-name mapping.
 
 For example, suppose an application implements `billing.invoices.read`. Create
 that permission in authd, include it in a role, assign the role to the user, and
@@ -213,7 +139,7 @@ For departure, **disable** the account to block new authd logins, revoke its aut
 sessions/refresh grants, and retain the identity for review. Also remove/revoke
 local app sessions when immediate removal is required. Delete only after reviewing
 identity links and audit/data-retention requirements; deleting authd does not erase
-that person's BDC, Temary, or other application data.
+that person's the app, Temary, or other application data.
 
 ### Change an email
 
@@ -280,7 +206,7 @@ revokes the family. Do not turn them on just because the checkbox exists.
 
 On the consent page, check the application name and requested access. **Allow and
 continue** releases the sign-in result, not your password. **Cancel** refuses that
-request. Plain sign-in with the first BDC profile does not need offline access.
+request. A basic application sign-in does not need offline access.
 
 Explicit authd sign-out/session revocation also revokes the linked offline grants.
 Natural session expiry and routine reauthentication are different from explicit
@@ -298,7 +224,7 @@ revocation. Apps must still handle their own session lifecycle.
 | `invalid_scope` | Client asked for an unknown or disallowed scope. Enabling a checkbox here is only half the configuration. |
 | `access_denied` | User lacks a requested application permission, or declined consent. Check the requested set and the assigned roles. |
 | `unmet_authentication_requirements` | An essential authentication requirement or client MFA floor cannot be met. Enroll the factor; do not treat voluntary `acr_values` alone as a mandatory MFA policy. |
-| Missing email/group at BDC | Check user email, client-allowed scopes, BDC-requested scopes, group-claim setting and exact mapping names. |
+| Missing email/group at the app | Check user email, client-allowed scopes, the app-requested scopes, group-claim setting and exact mapping names. |
 | Wrong role or disabled user still in an app | Check the application's own cookie, provisioning/default-role policy, and admission logic. Revoke its session too. |
 | `invalid_grant` during callback or refresh | Expired/consumed code, binding mismatch, revoked grant, or reused refresh token. Restart authorization; never retry a spent credential indefinitely. |
 | Failure with a request reference | Correlate that reference and timestamp in authd/proxy logs; share neither secret values nor token-bearing URLs. |
@@ -310,8 +236,10 @@ another application.
 
 ## 9. Where the documentation lives
 
-**In the browser:** Administration → Start here, section help, per-field notes,
-and saved client connection details. **In a native installation:**
+**In the browser:** Administration → Start here for the generic adding-an-app
+workflow; **Documentation** for every shipped Markdown guide, searchable contents,
+heading links and original source. Section help and field notes link back to the
+same documentation. Client connection details show saved registration values. **In a native installation:**
 `/usr/local/share/doc/authd/OPERATOR_GUIDE.md`, `DEPLOYMENT.md`, and `docs/`.
 **In the source:** the same files, plus `SPEC.md` for binding behavior,
 `DESIGN_LANGUAGE.md` for the interface contract, and `VALIDATION.md` for what has

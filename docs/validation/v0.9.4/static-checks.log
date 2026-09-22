@@ -1,0 +1,44 @@
+v0.9.4 static and package checks; Linux authoring host, not a native service deployment.
+$ make fmt-check env-check linux-deploy-check
+
+$ sh -n scripts/check-offline.sh
+
+$ sh -n scripts/generate-master-key.sh
+
+$ sh -n deploy/openbsd/authd-run
+
+PASS: 15 vendored parser source/license files byte-identical to Go toolchain snapshot.
+PASS: 90 protocol, identity, crypto, DB/migrations, dependency, listener, CLI and deployment files unchanged.
+PASS: edited form actions and input/select/textarea field names unchanged.
+$ make DESTDIR=/mnt/data/authd-v094-evidence/stage-linux INSTALL_OS=Linux BINARY=/bin/true install
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing systemd service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+
+PASS: Linux stage includes docs/license and no active env, pgpass or master key.
+$ make DESTDIR=/mnt/data/authd-v094-evidence/stage-openbsd INSTALL_OS=OpenBSD BINARY=/bin/true install
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing OpenBSD rc.d service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+
+PASS: OpenBSD stage includes docs/license and no active env, pgpass or master key.
+PASS: 2 shell snippets syntax checked, not executed.
+PASS: 62 relative documentation targets exist.
+$ git diff --check
+
+Full production graph test attempt (must NOT be treated as a pass):
+go: go.mod requires go >= 1.26.0 (running go 1.23.2; GOTOOLCHAIN=local)
+Exit: 1
+NOT RUN: full Go 1.26+ executable, pinned x/text v0.42.0 and PostgreSQL execution on this authoring host.

@@ -176,3 +176,15 @@ preserves the distinction between unknown IP and absent resolution so the OIDC
 layer cannot fall back to a socket filename for auditing. The public issuer,
 cookies and authorization remain unchanged. Native service setup owns directory
 provisioning and supplementary groups, not the Go process.
+
+
+## Release documentation
+
+`manual.go` embeds the original root/docs/deployment Markdown. The isolated
+`internal/docsite` package parses and indexes the finite catalog once; its
+allow-list renderer does not execute raw HTML or load remote resources.
+`internal/web` authenticates every catalog/page/source request through the
+existing live administrator check. No database schema, documentation service,
+frontend renderer or runtime filesystem traversal is added. Markdown is not a
+user-controlled input surface. The standalone parser source and license live in
+`internal/thirdparty/markdown`; it uses existing x/text Unicode folding.

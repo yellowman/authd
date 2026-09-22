@@ -4,11 +4,20 @@ This document records the first real relying-party contract for `authd`.
 It is based on the current `yellowman/bdcmaps` `main` branch inspected on
 2026-09-21, rather than on a hypothetical OIDC client.
 
+## Verified application login
+
+**PASS — full bdcmaps login through the actual relying application**, reported by
+the operator on 2026-09-22 after v0.9.3. This is the first completed real-app
+integration, not merely a provider-shaped fixture. See the
+[operator report](validation/v0.9.3/external-bdcmaps-report.md) for the exact
+evidence boundary. Independent OIDC conformance and unreported negative-access,
+MFA and infrastructure checks remain separate gates.
+
 ## First login, in operator order
 
-Read [Using authd](../OPERATOR_GUIDE.md#4-connect-bdc-maps-first) for the complete
-walkthrough. The authd browser has the same starting point at **Administration →
-Start here**. Do not configure every section just to connect BDC.
+This is the app-specific profile. [Adding an app](ADDING_AN_APP.md) explains the
+generic workflow; this document is available under **Documentation → Connect
+applications**. Do not configure every section just to connect BDC.
 
 1. **authd Roles:** create the four `bdcmaps-…` roles below; no permission
    checkboxes are required for BDC group mapping.
@@ -26,7 +35,7 @@ Start here**. Do not configure every section just to connect BDC.
    inspect the role inside BDC. Provider login alone does not prove its callback.
 
 For the named deployment, the exact callback would be
-`https://maps.ykwc.com/auth/callback`; it is not a verified live deployment claim.
+`https://maps.ykwc.com/auth/callback`; use that exact value only for that deployment. The operator has reported full BDC login; the summary does not separately qualify every proxy or role setting.
 Keep authd's issuer as its public HTTPS origin, never its Unix-socket address.
 
 ### New BDC installation versus an existing one

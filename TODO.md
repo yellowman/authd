@@ -1,19 +1,23 @@
-# v0.9.3 operator/form follow-through
+# Current follow-through — v0.9.4
 
-Implemented: native-form response policy, admin-only Start here, field help,
-operator guide, connection summaries and origin/CSRF-specific recovery messages.
-The normal component gates and 24-page layout witness pass. Native browser
-submission must still run in an approved environment without the authoring
-container's navigation block; use `make browser-check` and
-[the test guide](docs/BROWSER_TESTS.md). This is additional to the existing real
-PostgreSQL, actual BDC callback and native deployment qualification below.
+- [x] Generic Markdown-driven adding-an-app workflow, separate application profiles.
+- [x] Administrator-only catalog, renderer, full-text search, TOC and original source.
+- [x] Unshaded SVG sidebar with accessible names and explicit current-page state.
+- [x] Visible field explanations and a searchable field reference.
+- [x] **Full bdcmaps application login verified**, as reported by the operator on
+  2026-09-22. The first actual relying-party callback/login gate is complete.
+- [ ] Independent OIDC/OAuth conformance certification (not implied by one working app).
+
+See VALIDATION.md for current and historical evidence. The sections below track
+implementation and remaining qualification, not a claim that each future app
+has been integrated.
 
 # Implementation sequence — v0.9.1
 
 Checked implementation items mean source is present, not production qualification.
 Qualification items identify reported or locally executed evidence explicitly in
 `VALIDATION.md`. The v0.9.0 external PostgreSQL/build/live-provider pass is now
-recorded; actual bdcmaps and production deployment checks remain open.
+recorded; the later full bdcmaps app login is also recorded. Unreported deployment checks remain open.
 
 ## Identity delivery
 
@@ -49,7 +53,7 @@ recorded; actual bdcmaps and production deployment checks remain open.
 - [x] Refresh-family replay detection, revocation, and RP-initiated logout.
 - [x] OIDC client create/edit/delete/secret rotation in the admin UI.
 - [x] Protocol-level bdcmaps-shaped in-memory end-to-end regression.
-- [ ] Run `docs/BDCMAPS_INTEGRATION.md` against the actual private bdcmaps app.
+- [x] Actual bdcmaps callback and complete application login, operator-reported PASS (2026-09-22); not just a fixture.
 - [ ] Run an independent OIDC/OAuth interoperability/conformance suite.
 
 ## v0.9.0 audit corrections
@@ -63,7 +67,7 @@ recorded; actual bdcmaps and production deployment checks remain open.
 - [x] Live-session code redemption; atomic login replacement and explicit logout grant revocation.
 - [x] Bounded crypto caches, origin lookup without catalog truncation, throttled session touches, batched cleanup and reverse indexes.
 - [x] Exact-prefix migration validation and reserved-scope constraints.
-- [ ] Independent full OIDC conformance runner, real bdcmaps callback, SQL lock/query plan/load qualification.
+- [ ] Independent full OIDC conformance runner and SQL lock/query plan/load qualification.
 
 ## Qualification
 

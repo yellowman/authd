@@ -337,6 +337,9 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		d.View = "permissions"
 	}
+	if d.View == "guide" {
+		s.startDocument(&d)
+	}
 	if time.Since(sess.AuthTime) > 10*time.Minute {
 		d.Notice = "You can read administration. Sign in again before making changes; privileged writes require fresh authentication."
 	}

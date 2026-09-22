@@ -18,8 +18,10 @@ import (
 	"strings"
 	"time"
 
+	manual "github.com/yellowman/authd"
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/cryptoutil"
+	"github.com/yellowman/authd/internal/docsite"
 	"github.com/yellowman/authd/internal/identity"
 	"github.com/yellowman/authd/internal/oidc"
 	"github.com/yellowman/authd/internal/requestid"
@@ -34,6 +36,7 @@ type Server struct {
 	healthCheck func(context.Context) error
 	templates   *template.Template
 	oidc        *oidc.HTTP
+	docs        *docsite.Library
 }
 
 // Form failures remain forbidden, but the HTML response should tell the user
@@ -45,6 +48,10 @@ var (
 
 type clientIPContextKey struct{}
 type pageData struct {
+	Document                                                                                                                     *docsite.Document
+	DocumentGroups                                                                                                               []docsite.Group
+	DocumentQuery                                                                                                                string
+	DocumentCount                                                                                                                int
 	Title, Issuer, Section, View, CSRF, Error, ErrorReference, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
 	Development                                                                                                                  bool
 	Session                                                                                                                      identity.Session
@@ -66,8 +73,9 @@ func New(cfg config.Config, auth *identity.Service, health func(context.Context)
 		return nil, errors.New("identity service and health check are required")
 	}
 	tmpl, err := template.New("").Funcs(template.FuncMap{
-		"scopeHelp": oidc.ScopeDescription,
-		"join":      strings.Join, "selected": func(ids []string, id string) bool {
+		"scopeHelp":       oidc.ScopeDescription,
+		"adminNavigation": adminNavigation,
+		"join":            strings.Join, "selected": func(ids []string, id string) bool {
 			for _, x := range ids {
 				if x == id {
 					return true
@@ -89,7 +97,14 @@ func New(cfg config.Config, auth *identity.Service, health func(context.Context)
 	if provider == nil {
 		provider = oidc.NewHTTP(nil, cfg.Issuer, cfg.Development)
 	}
-	return &Server{cfg: cfg, auth: auth, healthCheck: health, templates: tmpl, oidc: provider}, nil
+	docs, err := manual.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load documentation: %w", err)
+	}
+	if _, ok := docs.Document(docsite.StartDocument); !ok {
+		return nil, errors.New("missing getting-started documentation")
+	}
+	return &Server{docs: docs, cfg: cfg, auth: auth, healthCheck: health, templates: tmpl, oidc: provider}, nil
 }
 func (s *Server) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
@@ -115,6 +130,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /account/mfa/recovery", s.regenerateRecoveryCodes)
 	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/admin/", http.StatusSeeOther) })
 	mux.HandleFunc("GET /admin/{$}", s.admin)
+	mux.HandleFunc("GET /admin/docs", s.documents)
+	mux.HandleFunc("GET /admin/docs/raw", s.documentSource)
 	mux.HandleFunc("POST /admin/users/create", s.createUser)
 	mux.HandleFunc("POST /admin/users/save", s.editUser)
 	mux.HandleFunc("POST /admin/users/password", s.resetPassword)
@@ -342,7 +359,7 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request, admin, allowForced
 }
 func safeReturn(path string) string {
 	switch path {
-	case "/admin/", "/authorize":
+	case "/admin/", "/authorize", "/admin/docs":
 		return path
 	default:
 		return "/account"

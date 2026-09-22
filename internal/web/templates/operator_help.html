@@ -2,21 +2,20 @@
 <section class="view-help" aria-label="About this section">
 {{if eq .View "users"}}
 <h2>Users are people, not applications.</h2><p>Create one account per person, then assign roles. A user can sign in with no roles; the application still decides whether that identity has access. You do not create another password for each app.</p>
-<p><a href="/admin/?view=guide#bdc">Connecting BDC Maps?</a> Give each BDC user an email and the appropriate <code>bdcmaps-…</code> role.</p>
 {{else if eq .View "roles"}}
-<h2>A role is a bundle you assign to people.</h2><p>For the current BDC integration, the role’s exact name is sent as an OIDC group and mapped by BDC. A role may have no permissions. For newer scope-aware apps, a role bundles individual permission scopes.</p><p><code>system-admin</code> controls authd. Use a separate <code>bdcmaps-administrator</code> role for BDC administration. After saving a role, <a href="/admin/?view=users">assign it to users</a>.</p>
+<h2>A role is a bundle you assign to people.</h2><p>An app may map a role's exact name from <code>groups</code> or <code>roles</code>, or check the permissions bundled in it. A role may have no permissions. After saving a role, <a href="/admin/?view=users">assign it to users</a>.</p><p><code>system-admin</code> controls authd, not every application. Use app-qualified names such as <code>inventory-viewer</code> for application roles.</p>
 {{else if eq .View "permissions"}}
-<h2>A permission names an operation the app understands.</h2><p>Creating <code>reports.export</code> does not add an export button or teach any app to authorize it. The application must implement the check. You can skip this section for BDC’s existing group mapping.</p><p>For a scope-aware app: create the agreed permission, add it to a role, assign the role to the user, allow it on the client, and have the app request it. Missing user permission denies that authorization request; it is not silently dropped.</p>
+<h2>A permission names an operation the app understands.</h2><p>Creating <code>inventory.items.read</code> does not teach an app to authorize it. The application must implement the check. Skip this section for identity-only or groups-only integrations.</p><p>For a scope-aware app: create the agreed permission, include it in a role, assign that role, allow the scope on the client, and have the app request and check it. Missing user permission denies the request.</p>
 {{else if eq .View "clients"}}
-<h2>A client is an application allowed to ask authd for sign-in.</h2><p>Register BDC Maps here, then copy the connection details into BDC. This form alone does not configure BDC or give all authd users a BDC role. <a href="/admin/?view=guide#bdc">First BDC login walkthrough</a>.</p>
+<h2>A client is an application allowed to ask authd for sign-in.</h2><p>Register the app, then copy its saved connection details into that app's OIDC settings. This form alone does not configure the app or assign people access. <a href="/admin/?view=guide">Adding an app walkthrough</a>.</p>
 {{else if eq .View "sessions"}}
-<h2>These are sign-ins at authd, not every app’s session.</h2><p>Revoking one stops reuse of that authd session and its associated refresh grants. Already-issued access tokens expire normally. An app can retain its own session cookie; remove access there too when immediate lockout is required.</p>
+<h2>These are sign-ins at authd, not every app’s session.</h2><p>Revoking one stops reuse of that authd session and its associated refresh grants. Already-issued access tokens expire normally. An app may keep its own cookie; revoke its local sessions too when immediate lockout is required.</p>
 {{else if eq .View "keys"}}
-<h2>Signing keys let applications verify authd’s tokens.</h2><p>authd creates the initial signing key automatically. You do not need to rotate it to connect an app. The public key set is at <code>{{.Issuer}}/jwks.json</code>; never give an application authd’s master key or private signing key.</p><p>The master key encrypts stored secrets; rotating a signing key is a different operation. Old public verification keys remain published. This screen does not delete them.</p>
+<h2>Signing keys let applications verify authd’s tokens.</h2><p>authd creates the initial key automatically. You do not need to rotate it to connect an app. Public keys are at <code>{{.Issuer}}/jwks.json</code>. Never give an application the master key or a private signing key.</p><p>The master key encrypts stored secrets; signing-key rotation is a different operation. Old public verification keys remain published. This screen does not delete them.</p>
 {{else}}
-<h2>Audit records show what authd did.</h2><p>Use events to distinguish a successful sign-in from a client or permission failure. These are authd’s events, not BDC’s callback log. Copy the error reference and timestamp for an operator; do not copy passwords, tokens, browser cookies, or client secrets.</p>
+<h2>Audit records show what authd did.</h2><p>These are authd events, not an application's callback log. Correlate the error reference and timestamp; do not copy passwords, tokens, browser cookies or client secrets into a ticket.</p>
 {{end}}
-<p class="small"><a href="/admin/?view=guide">Start here and terminology</a></p>
+<p class="small"><a href="/admin/docs?doc=docs%2FFIELD_REFERENCE.md">Field reference</a> · <a href="/admin/docs">All documentation</a></p>
 </section>
 {{end}}
 
@@ -28,13 +27,13 @@
 <div><dt>Issuer / provider URL</dt><dd><code>{{.Issuer}}</code></dd></div>
 <div><dt>Discovery URL</dt><dd><code>{{.Issuer}}/.well-known/openid-configuration</code></dd></div>
 <div><dt>Client ID</dt><dd><code>{{.SelectedClient.ClientID}}</code></dd></div>
-<div><dt>Client type</dt><dd>{{.SelectedClient.Type}}</dd></div>
+<div><dt>Client type</dt><dd>{{if eq .SelectedClient.Type "confidential"}}Server-side app (confidential){{else}}Browser or native app (public){{end}}</dd></div>
 <div><dt>Allowed identity scopes</dt><dd><code>{{join .SelectedClient.IdentityScopes " "}}</code></dd></div>
 <div><dt>Allowed permission scopes</dt><dd>{{if .SelectedClient.Permissions}}<code>{{join .SelectedClient.Permissions " "}}</code>{{else}}None{{end}}</dd></div>
-<div><dt>Registered callbacks</dt><dd>{{range .SelectedClient.RedirectURIs}}<code class="block">{{.}}</code>{{end}}</dd></div>
+<div><dt>Registered sign-in callbacks</dt><dd>{{range .SelectedClient.RedirectURIs}}<code class="block">{{.}}</code>{{end}}</dd></div>
 </dl>
-<p class="field-help">Copy the issuer and client ID exactly. Configure the app to request only the scopes it needs from these allow-lists. The app uses Authorization Code + PKCE (S256). Confidential clients may use <code>client_secret_basic</code> or <code>client_secret_post</code>; public clients have no secret.</p>
-{{if eq .SelectedClient.ClientID "bdcmaps"}}<p class="field-help">BDC profile: request <code>openid profile email groups</code>, set its group claim to <code>groups</code>, and put the generated secret in BDC’s <code>OIDC_CLIENT_SECRET</code>. Configure the four group-to-role mappings in BDC; they are not inferred from this registration.</p>{{end}}
-<p class="field-help">No secret is included in these saved details. It is displayed only when created or rotated.</p>
+<p class="field-help">Copy the issuer and client ID exactly. Configure the app to request only the scopes it needs from these allow-lists. The app uses Authorization Code + PKCE (S256). Confidential clients use <code>client_secret_basic</code> or <code>client_secret_post</code>; public clients have no secret.</p>
+{{if eq .SelectedClient.ClientID "bdcmaps"}}<p class="field-help"><a href="/admin/docs?doc=docs%2FBDCMAPS_INTEGRATION.md">BDC Maps integration profile</a>: application-side settings, <code>OIDC_CLIENT_SECRET</code> and group mappings.</p>{{end}}
+<p class="field-help">No secret is included in these saved details. It is displayed only when created or rotated. <a href="/admin/?view=guide#doc-5-configure-the-application-side">Application-side setup</a>.</p>
 </div></section>
 {{end}}

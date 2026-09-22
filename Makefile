@@ -40,10 +40,10 @@ deps:
 	${GO} mod verify
 
 fmt:
-	${GOFMT} -w $$(find cmd internal -type f -name '*.go' -print)
+	${GOFMT} -w $$(find cmd internal -type f -name '*.go' -print) manual.go manual_test.go
 
 fmt-check:
-	@test -z "$$(${GOFMT} -l $$(find cmd internal -type f -name '*.go' -print))" || { echo "Run make fmt" >&2; exit 1; }
+	@test -z "$$(${GOFMT} -l $$(find cmd internal -type f -name '*.go' -print) manual.go manual_test.go)" || { echo "Run make fmt" >&2; exit 1; }
 
 env-check:
 	@cmp -s .env.example deploy/openbsd/authd.env.example || { \
@@ -170,8 +170,9 @@ install-files:
 	@echo "==> installing authd binary and documentation"
 	@install -d -m 0755 "${DESTDIR}${BINDIR}" "${DESTDIR}${SHAREDIR}/postgresql" "${DESTDIR}${DOCDIR}"
 	@install -m 0755 "${BINARY}" "${DESTDIR}${BINDIR}/authd"
-	@install -m 0644 README.md OPERATOR_GUIDE.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md ARCHITECTURE.md VALIDATION.md TODO.md CHANGELOG.md "${DESTDIR}${DOCDIR}/"
-	@install -d -m 0755 "${DESTDIR}${DOCDIR}/docs" "${DESTDIR}${SHAREDIR}/nginx"
+	@install -m 0644 README.md OPERATOR_GUIDE.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md ARCHITECTURE.md VALIDATION.md TODO.md CHANGELOG.md AGENTS.md THIRD_PARTY.md "${DESTDIR}${DOCDIR}/"
+	@install -d -m 0755 "${DESTDIR}${DOCDIR}/docs" "${DESTDIR}${SHAREDIR}/nginx" "${DESTDIR}${DOCDIR}/licenses"
+	@install -m 0644 internal/thirdparty/markdown/LICENSE "${DESTDIR}${DOCDIR}/licenses/markdown-LICENSE"
 	@cp -R docs/. "${DESTDIR}${DOCDIR}/docs/"
 	@find "${DESTDIR}${DOCDIR}/docs" -type d -exec chmod 0755 {} \;
 	@find "${DESTDIR}${DOCDIR}/docs" -type f -exec chmod 0644 {} \;
