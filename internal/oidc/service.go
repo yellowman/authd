@@ -152,7 +152,15 @@ func (s *Service) BeginAuthorization(ctx context.Context, values map[string][]st
 		t := now
 		minAuth = &t
 	}
-	req := AuthorizationRequest{ClientID: clientID, RedirectURI: redirect, Scopes: scopes, State: state, Nonce: nonce, CodeChallenge: challenge, LoginHint: loginHint, Prompt: prompt, MinAuthTime: minAuth, CreatedAt: now.UTC(), ExpiresAt: now.Add(10 * time.Minute).UTC()}
+	acrRaw, err := single(values, "acr_values", false, 1024)
+	if err != nil {
+		return "", AuthorizationRequest{ClientID: clientID, RedirectURI: redirect}, client, err
+	}
+	requiredACR, err := parseACRValues(acrRaw, client, scopes)
+	if err != nil {
+		return "", AuthorizationRequest{ClientID: clientID, RedirectURI: redirect}, client, err
+	}
+	req := AuthorizationRequest{ClientID: clientID, RedirectURI: redirect, Scopes: scopes, RequiredACR: requiredACR, State: state, Nonce: nonce, CodeChallenge: challenge, LoginHint: loginHint, Prompt: prompt, MinAuthTime: minAuth, CreatedAt: now.UTC(), ExpiresAt: now.Add(10 * time.Minute).UTC()}
 	raw, err := cryptoutil.RandomToken(32)
 	if err != nil {
 		return "", AuthorizationRequest{}, Client{}, err
@@ -180,18 +188,21 @@ func (s *Service) ContinueAuthorization(ctx context.Context, requestRaw, session
 		needLogin = true
 	}
 	mfa := contains(session.AuthMethods, "otp") || contains(session.AuthMethods, "recovery")
-	if !needLogin && client.RequireMFA && !mfa {
+	if !needLogin && !meetsACR(session.AuthMethods, req.RequiredACR) {
 		needLogin = true
 	}
 	if needLogin {
+		if sessionErr == nil && req.RequiredACR == ACRMFA && !session.User.MFAEnabled {
+			return s.authRedirect(req, "", "unmet_authentication_requirements"), false, ErrUnmetAuthn
+		}
 		if req.Prompt == "none" {
 			return s.authRedirect(req, "", "login_required"), false, ErrLoginRequired
 		}
 		// A session authenticated after this request but still lacking required MFA
 		// cannot be improved by looping through login again if the account has no
 		// enrolled factor. Treat that as denied rather than a redirect loop.
-		if sessionErr == nil && client.RequireMFA && !mfa && !session.AuthTime.Before(req.CreatedAt) {
-			return s.authRedirect(req, "", "access_denied"), false, ErrAccessDenied
+		if sessionErr == nil && req.RequiredACR == ACRMFA && !mfa && !session.AuthTime.Before(req.CreatedAt) {
+			return s.authRedirect(req, "", "unmet_authentication_requirements"), false, ErrUnmetAuthn
 		}
 		return "", true, nil
 	}
@@ -275,7 +286,7 @@ func (s *Service) tokensForGrant(ctx context.Context, grant CodeGrant, now time.
 	}
 	response := TokenResponse{AccessToken: access, TokenType: "Bearer", ExpiresIn: int64(ttl.Seconds()), Scope: scopeString}
 	if contains(grant.Scopes, "openid") {
-		idClaims := tokenClaims{Issuer: s.issuer, Subject: grant.Subject.ID, Audience: grant.Client.ClientID, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), AuthTime: grant.Subject.AuthTime.Unix(), Nonce: grant.Nonce, AMR: append([]string(nil), grant.Subject.AuthMethods...)}
+		idClaims := tokenClaims{Issuer: s.issuer, Subject: grant.Subject.ID, Audience: grant.Client.ClientID, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), AuthTime: grant.Subject.AuthTime.Unix(), ACR: acrForMethods(grant.Subject.AuthMethods), Nonce: grant.Nonce, AMR: append([]string(nil), grant.Subject.AuthMethods...), SID: grant.Subject.SessionID}
 		response.IDToken, err = signJWT(keyRecord.KID, private, withIdentityClaims(idClaims, grant.Subject, grant.Scopes, true, grant.Nonce))
 		if err != nil {
 			return TokenResponse{}, err
@@ -286,7 +297,7 @@ func (s *Service) tokensForGrant(ctx context.Context, grant CodeGrant, now time.
 		if e != nil {
 			return TokenResponse{}, e
 		}
-		if e = s.Store.CreateRefreshFamily(ctx, grant.Subject.ID, grant.Client.ID, grant.Scopes, grant.Subject.AuthTime, grant.Subject.AuthMethods, identity.Hash(refresh), now.Add(s.refreshIdleTTL), now.Add(s.refreshAbsoluteTTL)); e != nil {
+		if e = s.Store.CreateRefreshFamily(ctx, grant.Subject.ID, grant.Subject.SessionID, grant.Client.ID, grant.Scopes, grant.Subject.AuthTime, grant.Subject.AuthMethods, identity.Hash(refresh), now.Add(s.refreshIdleTTL), now.Add(s.refreshAbsoluteTTL)); e != nil {
 			return TokenResponse{}, e
 		}
 		response.RefreshToken = refresh
@@ -444,31 +455,31 @@ func (s *Service) Revoke(ctx context.Context, token, clientID string, a identity
 	return s.Store.RevokeRefreshToken(ctx, identity.Hash(token), clientID, a)
 }
 
-func (s *Service) LogoutClient(ctx context.Context, idTokenHint string, now time.Time) (Client, string, error) {
+func (s *Service) LogoutClient(ctx context.Context, idTokenHint string, now time.Time) (Client, string, string, error) {
 	kid, err := tokenHeader(idTokenHint)
 	if err != nil {
-		return Client{}, "", ErrInvalidGrant
+		return Client{}, "", "", ErrInvalidGrant
 	}
 	record, err := s.Store.SigningKey(ctx, kid)
 	if err != nil {
-		return Client{}, "", ErrInvalidGrant
+		return Client{}, "", "", ErrInvalidGrant
 	}
 	public, err := parsePublicJWK(record.PublicJWK)
 	if err != nil {
-		return Client{}, "", ErrInvalidGrant
+		return Client{}, "", "", ErrInvalidGrant
 	}
 	// RP-Initiated Logout recommends accepting an otherwise-valid ID Token
 	// hint for a current/recent OP session even after exp. Signature, issuer,
 	// audience, subject and token shape still have to validate.
 	claims, err := verifyJWT(idTokenHint, public, s.issuer, now, false)
 	if err != nil || claims.Audience == "" || claims.Subject == "" || claims.AuthTime == 0 || claims.ClientID != "" {
-		return Client{}, "", ErrInvalidGrant
+		return Client{}, "", "", ErrInvalidGrant
 	}
 	client, err := s.Store.Client(ctx, claims.Audience)
 	if err != nil || !client.Enabled {
-		return Client{}, "", ErrInvalidGrant
+		return Client{}, "", "", ErrInvalidGrant
 	}
-	return client, claims.Subject, nil
+	return client, claims.Subject, claims.SID, nil
 }
 
 func authorizationRedirectWithIssuer(issuer string, req AuthorizationRequest, code, oauthErr string) string {

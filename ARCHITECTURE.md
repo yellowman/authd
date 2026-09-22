@@ -150,3 +150,8 @@ continuations, one-use codes, PKCE S256, encrypted RSA signing keys, short-lived
 JWT access/ID tokens, and rotating opaque refresh families. Protocol state is
 kept in the OIDC store; identity/session authority stays in the identity core.
 The internal Store contracts are not public SDKs or multi-backend abstractions.
+
+
+## Relying-party boundary
+
+Authd owns organizational human identity, local credentials, MFA, provider sessions and optional application-wide entitlements. Relying applications retain domain authority such as tenants, organizations, customers, PBXs, extensions, projects, rooms, cases and resource ownership. Durable RP identity is `(issuer, subject)` and provider-session correlation is `sid`; see `docs/RP_INTEGRATION.md`. Applications with customer-controlled IdPs may trust those providers directly rather than federating them through authd.

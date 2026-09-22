@@ -1,4 +1,4 @@
-# v0.7 validation record
+# v0.8 validation record
 
 This is a source-delivery validation record, not a production signoff or an OIDC
 conformance certificate. No replacement pgx or x/crypto module is used by the
@@ -8,7 +8,7 @@ reported checks.
 
 The installed toolchain is Go 1.23.2. The production module requires Go 1.25 and
 its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.7 tree:
+Within that boundary, the following checks passed on the current v0.8 tree:
 
 | Check | Result and scope |
 |---|---|
@@ -40,6 +40,11 @@ The OIDC regression suite now exercises, among other cases:
 - RP logout with exact registered post-logout redirects;
 - bare and cross-subject logout requests cannot terminate the current provider session;
 - signed expired ID-token hints remain accepted for current-subject RP logout;
+- discovery advertises `acr_values_supported` and `acr`/`sid`;
+- MFA `acr_values` requests force step-up rather than issuing a weaker context;
+- unsupported ACR requirements return `unmet_authentication_requirements` to an already-trusted redirect;
+- ID Tokens emit actual `acr`/`amr` and provider-session `sid`; refresh preserves the same `sid`;
+- a valid same-subject logout hint for a different `sid` cannot terminate the current provider session;
 - duplicate logout security-parameter rejection before session destruction;
 - bounded JWT input;
 - signing-key rotation while old public verification remains available;
@@ -86,7 +91,7 @@ environment. Therefore the following have **not** passed here:
 
 - full executable build using Go 1.25 and the real pgx/x/crypto modules;
 - the actual Argon2id KDF round trip;
-- migrations 001/002/003 executed against PostgreSQL;
+- migrations 001/002/003/004 executed against PostgreSQL;
 - PostgreSQL transaction/concurrency assertions in the integration build tag;
 - the live daemon against a real PostgreSQL database;
 - the actual private `yellowman/bdcmaps` application logging into authd;
@@ -95,7 +100,7 @@ environment. Therefore the following have **not** passed here:
 - backup/restore, master-key rotation, HA or production deployment qualification.
 
 The prior v0.4 Chromium fixture review covered the base Liminal-derived login,
-account and administration layout. v0.7's lifecycle/Clients/Keys branches is covered
+account and administration layout. v0.8's lifecycle/Clients/Keys/ACR branches is covered
 by template rendering tests here, but it has not been re-reviewed in a live
 browser/daemon environment and is not claimed as such.
 

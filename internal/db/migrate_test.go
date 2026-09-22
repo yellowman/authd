@@ -65,12 +65,25 @@ func TestOIDCMigrationAddsDurableContinuationsAndRefreshContext(t *testing.T) {
 	}
 }
 
+func TestOIDCRPContractMigrationAddsACRAndSID(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/004_oidc_rp_contract.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(body)
+	for _, marker := range []string{"required_acr", "urn:authd:acr:mfa", "ADD COLUMN session_id uuid"} {
+		if !strings.Contains(sql, marker) {
+			t.Fatalf("missing RP contract migration guard %q", marker)
+		}
+	}
+}
+
 func TestMigrationManifestIsOrderedAndUnique(t *testing.T) {
 	manifest, err := migrationManifest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []migrationEntry{{Version: 1, Name: "001_init.sql"}, {Version: 2, Name: "002_identity_lifecycle.sql"}, {Version: 3, Name: "003_oidc_authorization.sql"}}
+	want := []migrationEntry{{Version: 1, Name: "001_init.sql"}, {Version: 2, Name: "002_identity_lifecycle.sql"}, {Version: 3, Name: "003_oidc_authorization.sql"}, {Version: 4, Name: "004_oidc_rp_contract.sql"}}
 	if len(manifest) != len(want) {
 		t.Fatalf("migration count %d, want %d", len(manifest), len(want))
 	}

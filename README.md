@@ -5,10 +5,11 @@ credentials, roles, permissions, MFA, provider sessions, and OIDC once; let many
 applications consume the same identity. The first relying-party target is
 `yellowman/bdcmaps`.
 
-## v0.7 — deployment hardening
+Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-v0.7 adds deployment-role and failure-observability hardening on top of the v0.6
-lifecycle work and v0.5 OIDC provider. **This is implemented source, not production
+## v0.8 — relying-party contract and step-up
+
+v0.8 adds the relying-party identity/linking contract plus OIDC authentication-context step-up and provider-session correlation on top of the v0.7 deployment hardening. **This is implemented source, not production
 qualification.** The authoring
 environment cannot run PostgreSQL, download the selected Go 1.25 toolchain/modules,
 or run the actual private bdcmaps application. See `VALIDATION.md` for the exact
@@ -16,6 +17,10 @@ evidence boundary.
 
 Implemented in this revision:
 
+- OIDC `acr_values` handling with `urn:authd:acr:pwd` and `urn:authd:acr:mfa`, client-level MFA minimums, and `unmet_authentication_requirements` when the requested context cannot be satisfied.
+- ID Tokens now emit actual `acr`/`amr` plus stable provider-session `sid`; refresh families retain the originating `sid`.
+- RP-initiated logout checks `sid` when present so one same-subject provider session cannot terminate another.
+- A binding RP integration contract requires `(iss, sub)` identity keys, forbids silent email-based linking and tenant inference, and explicitly permits customer applications such as Evident to trust other IdPs directly instead of federating them through authd.
 - `authd migrate` is now the only normal executable path that performs DDL. Daemon and bootstrap startup verify the exact embedded migration manifest and fail closed on missing, stale, ahead, or altered migration history.
 - A reviewed PostgreSQL runtime-grant script supports a DML-only daemon role without schema ownership/CREATE privileges; migration/login role creation and passwords remain operator-owned.
 - Internal HTTP failures return a request reference and structured bounded error class for operator correlation without logging raw database/credential errors.

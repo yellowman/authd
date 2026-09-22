@@ -86,7 +86,10 @@ func (f *fakeOIDCStore) IssueAuthorizationCode(_ context.Context, rh, sh, ch []b
 	if !ok {
 		return CodeGrant{}, ErrLoginRequired
 	}
-	subject := Subject{ID: sess.User.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: true, Roles: sess.Roles, Permissions: sess.Permissions, AuthTime: sess.AuthTime, AuthMethods: sess.AuthMethods}
+	subject := Subject{ID: sess.User.ID, SessionID: sess.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: true, Roles: sess.Roles, Permissions: sess.Permissions, AuthTime: sess.AuthTime, AuthMethods: sess.AuthMethods}
+	if !meetsACR(sess.AuthMethods, r.RequiredACR) {
+		return CodeGrant{}, ErrUnmetAuthn
+	}
 	if !subjectCanGrant(sess, f.client, r.Scopes) {
 		return CodeGrant{}, ErrAccessDenied
 	}
@@ -105,11 +108,11 @@ func (f *fakeOIDCStore) ConsumeAuthorizationCode(_ context.Context, h []byte, cl
 	rec.consumed = true
 	return rec.grant, nil
 }
-func (f *fakeOIDCStore) CreateRefreshFamily(_ context.Context, userID, clientDBID string, scopes []string, authTime time.Time, methods []string, h []byte, idle, absolute time.Time) error {
+func (f *fakeOIDCStore) CreateRefreshFamily(_ context.Context, userID, sessionID, clientDBID string, scopes []string, authTime time.Time, methods []string, h []byte, idle, absolute time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	family := "family-1"
-	subject := Subject{ID: userID, Username: "alice", DisplayName: "Alice", Email: "alice@example.test", EmailVerified: true, Enabled: true, Roles: []string{"bdcmaps-admin"}, Permissions: []string{"bdcmaps.read"}, AuthTime: authTime, AuthMethods: methods}
+	subject := Subject{ID: userID, SessionID: sessionID, Username: "alice", DisplayName: "Alice", Email: "alice@example.test", EmailVerified: true, Enabled: true, Roles: []string{"bdcmaps-admin"}, Permissions: []string{"bdcmaps.read"}, AuthTime: authTime, AuthMethods: methods}
 	f.refresh[hashKey(h)] = &fakeRefresh{grant: RefreshGrant{FamilyID: family, Client: f.client, Subject: subject, Scopes: append([]string(nil), scopes...)}, clientID: f.client.ClientID, expires: minTime(idle, absolute), family: family}
 	return nil
 }
@@ -271,7 +274,7 @@ func providerFixture(t *testing.T) (*HTTP, *Service, *fakeOIDCStore, *fakeSessio
 	}
 	h := NewHTTP(svc, "https://auth.example.test", false)
 	sessionRaw, _ := cryptoutil.RandomToken(32)
-	sess := identity.Session{User: identity.User{ID: "00000000-0000-4000-8000-000000000001", Username: "alice", DisplayName: "Alice", Email: "alice@example.test", EmailVerified: true, Enabled: true}, Roles: []string{"bdcmaps-admin"}, Permissions: []string{"bdcmaps.read"}, AuthMethods: []string{"pwd"}, AuthTime: time.Now().Add(-time.Minute)}
+	sess := identity.Session{ID: "00000000-0000-4000-8000-000000000777", User: identity.User{ID: "00000000-0000-4000-8000-000000000001", Username: "alice", DisplayName: "Alice", Email: "alice@example.test", EmailVerified: true, Enabled: true}, Roles: []string{"bdcmaps-admin"}, Permissions: []string{"bdcmaps.read"}, AuthMethods: []string{"pwd"}, AuthTime: time.Now().Add(-time.Minute)}
 	sessions.byRaw[sessionRaw] = sess
 	store.sessions[hashKey(identity.Hash(sessionRaw))] = sess
 	return h, svc, store, sessions, sessionRaw, secret
@@ -742,5 +745,187 @@ func TestOriginCanonicalization(t *testing.T) {
 		if got, ok := canonicalOrigin(raw); ok {
 			t.Fatalf("invalid origin %q accepted as %q", raw, got)
 		}
+	}
+}
+
+func decodeJWTClaimsForTest(t *testing.T, raw string) tokenClaims {
+	t.Helper()
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		t.Fatalf("JWT parts=%d", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims tokenClaims
+	if err = json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	return claims
+}
+
+func TestDiscoveryAdvertisesAuthenticationContextAndSessionClaims(t *testing.T) {
+	h, _, _, _, _, _ := providerFixture(t)
+	w := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://auth.example.test/.well-known/openid-configuration", nil))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var metadata Metadata
+	if err := json.Unmarshal(w.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(metadata.ACRValuesSupported, ACRPassword) || !contains(metadata.ACRValuesSupported, ACRMFA) {
+		t.Fatalf("acr_values_supported=%v", metadata.ACRValuesSupported)
+	}
+	if !contains(metadata.ClaimsSupported, "acr") || !contains(metadata.ClaimsSupported, "sid") {
+		t.Fatalf("claims_supported=%v", metadata.ClaimsSupported)
+	}
+}
+
+func TestACRValuesMFAStepUpAndSIDSurviveRefresh(t *testing.T) {
+	h, _, store, sessions, sessionRaw, secret := providerFixture(t)
+	mux := muxFor(h)
+	verifier, challenge := verifierAndChallenge()
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"bdcmaps"},
+		"redirect_uri":          {"https://bdc.example.test/auth/callback"},
+		"scope":                 {"openid offline_access"},
+		"state":                 {"step-up"},
+		"nonce":                 {"nonce-step-up"},
+		"acr_values":            {ACRMFA},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
+	// The account has an enrolled factor, but this particular provider session
+	// was authenticated with password only. The authorization request must ask
+	// for interaction rather than silently issuing a weaker token.
+	sess := sessions.byRaw[sessionRaw]
+	sess.User.MFAEnabled = true
+	sessions.byRaw[sessionRaw] = sess
+	store.sessions[hashKey(identity.Hash(sessionRaw))] = sess
+	r := httptest.NewRequest(http.MethodGet, "https://auth.example.test/authorize?"+q.Encode(), nil)
+	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther || !strings.HasPrefix(w.Header().Get("Location"), "/login?") {
+		t.Fatalf("step-up was not requested: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	loginURL, _ := url.Parse(w.Header().Get("Location"))
+	requestHandle := loginURL.Query().Get("oidc")
+	if !cryptoutil.ValidToken(requestHandle) {
+		t.Fatal("missing step-up continuation")
+	}
+
+	// Simulate the successful fresh password+OTP login performed by the normal
+	// authd login form. The new session keeps a stable UUID which becomes sid.
+	sess.AuthMethods = []string{"pwd", "otp"}
+	sess.AuthTime = time.Now().UTC()
+	sessions.byRaw[sessionRaw] = sess
+	store.sessions[hashKey(identity.Hash(sessionRaw))] = sess
+	r = httptest.NewRequest(http.MethodGet, "https://auth.example.test/authorize?request="+url.QueryEscape(requestHandle), nil)
+	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusFound {
+		t.Fatalf("step-up resume: %d %s", w.Code, w.Body.String())
+	}
+	callback, _ := url.Parse(w.Header().Get("Location"))
+	code := callback.Query().Get("code")
+	if code == "" {
+		t.Fatal("step-up did not issue code")
+	}
+
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {"https://bdc.example.test/auth/callback"}, "client_id": {"bdcmaps"}, "client_secret": {secret}, "code_verifier": {verifier}}
+	r = httptest.NewRequest(http.MethodPost, "https://auth.example.test/token", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("step-up token exchange: %d %s", w.Code, w.Body.String())
+	}
+	var first TokenResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	claims := decodeJWTClaimsForTest(t, first.IDToken)
+	if claims.ACR != ACRMFA || claims.SID != sess.ID || !contains(claims.AMR, "otp") {
+		t.Fatalf("ID token authentication context: acr=%q sid=%q amr=%v", claims.ACR, claims.SID, claims.AMR)
+	}
+
+	refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {"bdcmaps"}, "client_secret": {secret}, "refresh_token": {first.RefreshToken}}
+	r = httptest.NewRequest(http.MethodPost, "https://auth.example.test/token", strings.NewReader(refresh.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("step-up refresh: %d %s", w.Code, w.Body.String())
+	}
+	var second TokenResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	refreshed := decodeJWTClaimsForTest(t, second.IDToken)
+	if refreshed.ACR != ACRMFA || refreshed.SID != sess.ID {
+		t.Fatalf("refresh lost authentication context: acr=%q sid=%q", refreshed.ACR, refreshed.SID)
+	}
+}
+
+func TestUnsupportedACRReturnsUnmetAuthenticationRequirements(t *testing.T) {
+	h, _, _, _, _, _ := providerFixture(t)
+	_, challenge := verifierAndChallenge()
+	q := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"bdcmaps"},
+		"redirect_uri":          {"https://bdc.example.test/auth/callback"},
+		"scope":                 {"openid"},
+		"state":                 {"unsupported-acr"},
+		"acr_values":            {"urn:example:acr:hardware-only"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
+	w := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://auth.example.test/authorize?"+q.Encode(), nil))
+	if w.Code != http.StatusFound {
+		t.Fatalf("unsupported ACR was not returned to trusted RP: %d %s", w.Code, w.Body.String())
+	}
+	location, _ := url.Parse(w.Header().Get("Location"))
+	if got := location.Query().Get("error"); got != "unmet_authentication_requirements" {
+		t.Fatalf("error=%q location=%s", got, location)
+	}
+	if location.Query().Get("state") != "unsupported-acr" {
+		t.Fatal("state was not preserved")
+	}
+}
+
+func TestLogoutHintForDifferentSIDDoesNotEndCurrentSession(t *testing.T) {
+	h, svc, _, sessions, sessionRaw, _ := providerFixture(t)
+	mux := muxFor(h)
+	now := time.Now().UTC()
+	record, key, err := svc.privateKey(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint, err := signJWT(record.KID, key, tokenClaims{
+		Issuer:    "https://auth.example.test",
+		Subject:   "00000000-0000-4000-8000-000000000001",
+		Audience:  "bdcmaps",
+		IssuedAt:  now.Add(-time.Minute).Unix(),
+		ExpiresAt: now.Add(5 * time.Minute).Unix(),
+		AuthTime:  now.Add(-time.Minute).Unix(),
+		SID:       "00000000-0000-4000-8000-000000000999",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := url.Values{"id_token_hint": {hint}, "post_logout_redirect_uri": {"https://bdc.example.test/"}}
+	r := httptest.NewRequest(http.MethodGet, "https://auth.example.test/logout?"+q.Encode(), nil)
+	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" || sessions.ended {
+		t.Fatalf("cross-sid logout accepted: status=%d location=%q ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
 }

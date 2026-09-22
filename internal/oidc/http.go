@@ -447,11 +447,13 @@ func (h *HTTP) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	var client Client
 	var hintedSubject string
+	var hintedSID string
 	var trusted bool
 	if hint != "" {
-		if c, subject, e := h.service.LogoutClient(r.Context(), hint, time.Now().UTC()); e == nil {
+		if c, subject, sid, e := h.service.LogoutClient(r.Context(), hint, time.Now().UTC()); e == nil {
 			client = c
 			hintedSubject = subject
+			hintedSID = sid
 			trusted = true
 		}
 	}
@@ -464,13 +466,13 @@ func (h *HTTP) logout(w http.ResponseWriter, r *http.Request) {
 	ended := false
 	if raw := h.readCookie(r, "session"); raw != "" {
 		if session, e := h.service.Sessions.Session(r.Context(), raw); e == nil {
-			if trusted && session.User.ID == hintedSubject {
+			if trusted && session.User.ID == hintedSubject && (hintedSID == "" || hintedSID == session.ID) {
 				if e = h.service.Sessions.EndSession(r.Context(), raw, auditFromRequest(r)); e == nil {
 					ended = true
 				}
 			} else if trusted {
-				// A valid token for another subject does not authorize ending this
-				// browser's session or redirecting it to that RP.
+				// A valid token for another subject or provider session does not
+				// authorize ending this browser's session or redirecting it to that RP.
 				trusted = false
 			}
 		} else if errors.Is(e, identity.ErrSession) {

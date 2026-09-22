@@ -15,6 +15,11 @@ var identityScopes = map[string]bool{
 	"openid": true, "profile": true, "email": true, "groups": true, "roles": true, "offline_access": true,
 }
 
+const (
+	ACRPassword = "urn:authd:acr:pwd"
+	ACRMFA      = "urn:authd:acr:mfa"
+)
+
 func single(values map[string][]string, name string, required bool, max int) (string, error) {
 	items := values[name]
 	if len(items) == 0 {
@@ -107,6 +112,65 @@ func parseMaxAge(raw string, now time.Time) (*time.Time, error) {
 	return &t, nil
 }
 
+func parseACRValues(raw string, client Client, scopes []string) (string, error) {
+	minimum := ""
+	if client.RequireMFA {
+		minimum = ACRMFA
+	}
+	if strings.TrimSpace(raw) == "" {
+		return minimum, nil
+	}
+	if !contains(scopes, "openid") || len(raw) > 1024 {
+		return "", ErrInvalidRequest
+	}
+	values := strings.Fields(raw)
+	if len(values) == 0 || len(values) > 16 {
+		return "", ErrInvalidRequest
+	}
+	selected := ""
+	for _, value := range values {
+		if len(value) > 256 {
+			return "", ErrInvalidRequest
+		}
+		switch value {
+		case ACRPassword, ACRMFA:
+			if selected == "" {
+				selected = value
+			}
+		}
+	}
+	if selected == "" {
+		return "", ErrUnmetAuthn
+	}
+	if minimum == ACRMFA {
+		return ACRMFA, nil
+	}
+	return selected, nil
+}
+
+func acrForMethods(methods []string) string {
+	if contains(methods, "otp") || contains(methods, "recovery") {
+		return ACRMFA
+	}
+	if contains(methods, "pwd") {
+		return ACRPassword
+	}
+	return ""
+}
+
+func meetsACR(methods []string, required string) bool {
+	switch required {
+	case "":
+		return true
+	case ACRPassword:
+		return acrForMethods(methods) == ACRPassword || acrForMethods(methods) == ACRMFA
+	case ACRMFA:
+		return acrForMethods(methods) == ACRMFA
+	default:
+		return false
+	}
+}
+
 func contains(items []string, wanted string) bool {
 	for _, item := range items {
 		if item == wanted {
@@ -124,6 +188,8 @@ func authorizationError(err error) string {
 		return "login_required"
 	case errors.Is(err, ErrAccessDenied):
 		return "access_denied"
+	case errors.Is(err, ErrUnmetAuthn):
+		return "unmet_authentication_requirements"
 	default:
 		return "invalid_request"
 	}

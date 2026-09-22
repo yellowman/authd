@@ -58,17 +58,17 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 
 	requestRaw := token(t)
 	now := time.Now().UTC()
-	req := oidc.AuthorizationRequest{ClientID: "bdcmaps", RedirectURI: "https://bdc.example.test/auth/callback", Scopes: []string{"bdcmaps.read", "openid"}, State: "state", Nonce: "nonce", CodeChallenge: "challenge", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)}
+	req := oidc.AuthorizationRequest{ClientID: "bdcmaps", RedirectURI: "https://bdc.example.test/auth/callback", Scopes: []string{"bdcmaps.read", "openid"}, RequiredACR: oidc.ACRPassword, State: "state", Nonce: "nonce", CodeChallenge: "challenge", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)}
 	require(t, store.CreateAuthorizationRequest(ctx, identity.Hash(requestRaw), req))
 	codeRaw := token(t)
 	grant, err := store.IssueAuthorizationCode(ctx, identity.Hash(requestRaw), actor.TokenHash, identity.Hash(codeRaw), now.Add(time.Minute))
 	require(t, err)
-	if grant.Subject.ID != actor.User.ID || grant.Nonce != "nonce" {
+	if grant.Subject.ID != actor.User.ID || grant.Subject.SessionID != actor.ID || grant.Nonce != "nonce" {
 		t.Fatal("authorization grant lost identity binding")
 	}
 	grant, err = store.ConsumeAuthorizationCode(ctx, identity.Hash(codeRaw), "bdcmaps", req.RedirectURI, "challenge", now)
 	require(t, err)
-	if grant.Client.ID != client.ID {
+	if grant.Client.ID != client.ID || grant.Subject.SessionID != actor.ID {
 		t.Fatal("code client binding changed")
 	}
 	if _, err = store.ConsumeAuthorizationCode(ctx, identity.Hash(codeRaw), "bdcmaps", req.RedirectURI, "challenge", now); !errors.Is(err, oidc.ErrInvalidGrant) {
@@ -76,11 +76,11 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 	}
 
 	refresh1 := token(t)
-	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, client.ID, req.Scopes, actor.AuthTime, actor.AuthMethods, identity.Hash(refresh1), now.Add(time.Hour), now.Add(2*time.Hour)))
+	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, actor.ID, client.ID, req.Scopes, actor.AuthTime, actor.AuthMethods, identity.Hash(refresh1), now.Add(time.Hour), now.Add(2*time.Hour)))
 	refresh2 := token(t)
 	rotated, err := store.RotateRefreshToken(ctx, identity.Hash(refresh1), identity.Hash(refresh2), "bdcmaps", nil, now, now.Add(time.Hour), identity.Audit{})
 	require(t, err)
-	if rotated.Client.ClientID != "bdcmaps" {
+	if rotated.Client.ClientID != "bdcmaps" || rotated.Subject.SessionID != actor.ID {
 		t.Fatal("refresh client binding changed")
 	}
 	if _, err = store.RotateRefreshToken(ctx, identity.Hash(refresh1), identity.Hash(token(t)), "bdcmaps", nil, now, now.Add(time.Hour), identity.Audit{}); !errors.Is(err, oidc.ErrRefreshReuse) {
@@ -90,7 +90,7 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 		t.Fatalf("compromised family remained usable: %v", err)
 	}
 	refresh3 := token(t)
-	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, client.ID, req.Scopes, actor.AuthTime, actor.AuthMethods, identity.Hash(refresh3), now.Add(time.Hour), now.Add(2*time.Hour)))
+	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, actor.ID, client.ID, req.Scopes, actor.AuthTime, actor.AuthMethods, identity.Hash(refresh3), now.Add(time.Hour), now.Add(2*time.Hour)))
 	require(t, store.RevokeRefreshToken(ctx, identity.Hash(refresh3), "bdcmaps", auditFixture))
 	var refreshAudits, reuseAudits, revokeAudits int
 	require(t, identityStore.DB.QueryRowContext(ctx, `SELECT
@@ -145,7 +145,7 @@ func TestPostgresOIDCLifecycle(t *testing.T) {
 	// state owned by the client is removed by foreign-key cascades, while
 	// already-issued short-lived JWTs are left to expire normally.
 	deleteRefresh := token(t)
-	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, client.ID, []string{"openid"}, actor.AuthTime, actor.AuthMethods, identity.Hash(deleteRefresh), now.Add(time.Hour), now.Add(2*time.Hour)))
+	require(t, store.CreateRefreshFamily(ctx, actor.User.ID, actor.ID, client.ID, []string{"openid"}, actor.AuthTime, actor.AuthMethods, identity.Hash(deleteRefresh), now.Add(time.Hour), now.Add(2*time.Hour)))
 	deleteRequest := token(t)
 	require(t, store.CreateAuthorizationRequest(ctx, identity.Hash(deleteRequest), oidc.AuthorizationRequest{
 		ClientID: client.ClientID, RedirectURI: client.RedirectURIs[0], Scopes: []string{"openid"}, CodeChallenge: "delete-challenge", CreatedAt: now, ExpiresAt: now.Add(time.Minute),

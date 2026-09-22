@@ -15,6 +15,7 @@ var (
 	ErrInvalidScope       = errors.New("invalid scope")
 	ErrLoginRequired      = errors.New("login required")
 	ErrAccessDenied       = errors.New("access denied")
+	ErrUnmetAuthn         = errors.New("unmet authentication requirements")
 	ErrRefreshReuse       = errors.New("refresh token reuse detected")
 	ErrSigningKeyNotFound = errors.New("signing key not found")
 )
@@ -31,7 +32,7 @@ type Store interface {
 	AuthorizationRequest(context.Context, []byte) (AuthorizationRequest, Client, error)
 	IssueAuthorizationCode(context.Context, []byte, []byte, []byte, time.Time) (CodeGrant, error)
 	ConsumeAuthorizationCode(context.Context, []byte, string, string, string, time.Time) (CodeGrant, error)
-	CreateRefreshFamily(context.Context, string, string, []string, time.Time, []string, []byte, time.Time, time.Time) error
+	CreateRefreshFamily(context.Context, string, string, string, []string, time.Time, []string, []byte, time.Time, time.Time) error
 	RotateRefreshToken(context.Context, []byte, []byte, string, []string, time.Time, time.Time, identity.Audit) (RefreshGrant, error)
 	RevokeRefreshToken(context.Context, []byte, string, identity.Audit) error
 	SigningKeys(context.Context) ([]SigningKey, error)

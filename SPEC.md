@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.7
+## Specification v0.8
 
-Status: binding product design. v0.7 implements the local identity/admin slice, the central OIDC provider path, lifecycle/operations controls, and the explicit migration/runtime PostgreSQL role boundary. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -651,6 +651,38 @@ The same exact-match rule applies to post-logout redirect URIs.
 
 Loopback redirect handling for native clients may be added later if a real native client is introduced; it is not silently generalized in v1.
 
+## 11.4 Relying-party integration contract
+
+Every RP MUST key an authd identity by the pair:
+
+```text
+(issuer, sub)
+```
+
+Email, username, `preferred_username`, `groups`, `roles`, display name, and other mutable claims MUST NOT be used as the durable identity key. Existing local accounts MUST NOT be silently linked to an authd subject merely because an email address matches. Linking an existing account requires an explicit administrator migration or an authenticated account-linking ceremony. After linking, `(issuer, sub)` is authoritative and email is profile data.
+
+Authentication by authd establishes the user's external identity, authentication context, and any explicitly requested authd-managed application-wide entitlements. It does not, by itself, establish tenant, organization, customer, PBX, extension, project, room, case, boundary, workspace, or other application-local membership. Such authority remains the responsibility of the RP unless a specific integration contract explicitly says otherwise.
+
+Three RP integration modes are supported as design patterns over the same OIDC protocol:
+
+```text
+identity-only
+    authd proves the person; RP owns all authorization
+
+hybrid
+    authd proves identity and selected application-wide entitlements;
+    RP owns tenant/resource membership and domain authorization
+
+authd-authorized
+    authd roles/permissions are sufficient for the RP's authorization model
+```
+
+An RP MAY retain application-local human identities, device identities, API keys, service credentials, PBX-local identities, extension credentials, or other principals that are outside authd. OIDC adoption does not require every credential-bearing principal in an application to become an authd user.
+
+`authd` is an organizational identity provider, not a mandatory identity authority for every application or customer. A relying party MAY trust another OIDC or SAML identity provider directly where its deployment, tenant, or customer model requires it. `authd` MUST NOT require external identities to be proxied or federated through authd merely to achieve a uniform issuer. Provider selection, tenant-to-provider routing, and customer federation belong to the relying application or its gateway unless upstream federation becomes an explicit authd product requirement.
+
+This is particularly important for products such as Evident, where one common gateway serves many target applications with divergent customer populations and can bind a customer deployment directly to that customer's IdP while retaining local tenant/boundary/purpose authority.
+
 ---
 
 # 12. Supported Protocol Flow
@@ -759,7 +791,13 @@ Required fields include:
     "groups",
     "roles",
     "auth_time",
-    "amr"
+    "acr",
+    "amr",
+    "sid"
+  ],
+  "acr_values_supported": [
+    "urn:authd:acr:pwd",
+    "urn:authd:acr:mfa"
   ],
   "authorization_response_iss_parameter_supported": true
 }
@@ -785,6 +823,7 @@ GET /authorize?
     nonce=...&
     code_challenge=...&
     code_challenge_method=S256&
+    acr_values=urn%3Aauthd%3Aacr%3Amfa&
     login_hint=user%40example.com
 ```
 
@@ -800,6 +839,7 @@ redirect_uri exact match
 requested scopes recognized/allowed
 code_challenge present
 code_challenge_method == S256
+acr_values omitted or contains at least one supported authd ACR
 ```
 
 The authorization transaction is bound to:
@@ -811,6 +851,7 @@ requested scope
 state
 nonce
 code_challenge
+required authentication context selected from acr_values/client policy
 login_hint (advisory only)
 created_at
 ```
@@ -819,8 +860,10 @@ The eventual authorization code is additionally bound to:
 
 ```text
 user_id
+provider session id (`sid`)
 auth_time
-authentication methods
+authentication context (`acr`)
+authentication methods (`amr`)
 granted scope
 ```
 
@@ -878,6 +921,31 @@ If supplied, `nonce` is cryptographically bound to the transaction and returned 
 ## 15.4 login_hint
 
 `login_hint` may prefill the username/email field but MUST NOT bypass authentication or reveal whether the hinted account exists.
+
+## 15.5 Authentication context and step-up
+
+The provider supports these Authentication Context Class Reference values:
+
+```text
+urn:authd:acr:pwd
+urn:authd:acr:mfa
+```
+
+`urn:authd:acr:pwd` means the provider session has satisfied the normal local password authentication ceremony. A stronger MFA-authenticated session also satisfies a request for this context.
+
+`urn:authd:acr:mfa` means the provider session includes a successfully verified enrolled TOTP factor or one-time recovery code in addition to the password ceremony. The resulting ID Token contains both `acr` and `amr`.
+
+The authorization request MAY contain the standard `acr_values` parameter. Authd selects the first ACR value in the RP's ordered list that authd supports, subject to the client's configured minimum. A client with `require_mfa=true` has an effective minimum of `urn:authd:acr:mfa` even when the request omits `acr_values` or prefers the password context.
+
+When a current provider session is weaker than the required context and the account has an enrolled factor, authd requires interactive reauthentication/step-up before issuing an authorization code. `max_age` may be combined with `acr_values`; for example an RP may require fresh MFA by requesting `acr_values=urn:authd:acr:mfa` with `max_age=300`.
+
+If authd cannot satisfy the RP's authentication-context requirement, the Authorization Endpoint returns:
+
+```text
+error=unmet_authentication_requirements
+```
+
+Authd MUST NOT silently issue a token with a weaker `acr`.
 
 ---
 
@@ -968,8 +1036,10 @@ Example:
   "iat": 1780000000,
   "exp": 1780000300,
   "auth_time": 1779999900,
-  "nonce": "...",
+  "acr": "urn:authd:acr:mfa",
   "amr": ["pwd", "otp"],
+  "sid": "a3d564c1-9fd8-4ea0-94b0-69df15ab95d0",
+  "nonce": "...",
   "preferred_username": "alice",
   "name": "Alice Example",
   "email": "alice@example.com",
@@ -999,6 +1069,12 @@ email_verified
 `groups` may include role names under `groups`.
 
 `roles` may include the same role names under `roles`.
+
+`acr` records the authentication context actually satisfied by the provider session; it is not copied from client input.
+
+`amr` records the authentication methods actually used.
+
+`sid` identifies the authd provider login session that authenticated the user. It is stable across authorization-code exchange and refreshes derived from that session. A new provider login receives a new `sid`. RPs that create their own local application session SHOULD retain `(issuer, sub, sid)` with that local session so a future logout mechanism can target the correct RP session.
 
 ## 17.3 Signing
 
@@ -1158,7 +1234,7 @@ PostgreSQL stores only a hash of the raw session value.
 Session record:
 
 ```text
-id
+id                 # the value projected as OIDC sid
 session_hash
 user_id
 created_at
@@ -1200,7 +1276,7 @@ Automatic RP-initiated logout requires a cryptographically valid `id_token_hint`
 
 When the provider session is already absent, a valid hint may still authorize idempotent redirection to that client's exactly registered post-logout URI. A request without trustworthy client/session context MUST NOT redirect to arbitrary destinations.
 
-Front-channel and back-channel RP logout propagation are deferred.
+Front-channel and back-channel RP logout propagation are deferred. The emitted `sid` claim is intentionally retained now so RPs can correlate local sessions without changing their local session schema when back-channel logout is later justified. A future back-channel implementation MUST target the RP session identified by `sid`, not every session belonging to the same subject.
 
 ---
 
@@ -2028,6 +2104,13 @@ The following are release-blocking.
 20. Additional weaker or recoverable protocol credentials require explicit enrollment and cannot be silently derived during normal password changes.
 21. A future RADIUS/TACACS+ adapter cannot bypass the same enabled/disabled user state and role/permission resolver.
 22. RADIUS and TACACS+ peer registrations remain protocol-specific and cannot be smuggled into the OIDC client model.
+23. RPs key authd identities by `(iss, sub)`, never by email, username, display name, role, or group claims.
+24. Matching email addresses never silently link an existing RP account to an authd identity.
+25. Authd authentication alone never creates application-local tenant, organization, customer, PBX, extension, project, room, case, boundary, workspace, or resource membership.
+26. An ID Token's `acr` reflects the authentication context actually satisfied; client input cannot inject or upgrade it.
+27. `sid` identifies the provider login session and survives token refresh for that session; a fresh provider login receives a different `sid`.
+28. A client requiring MFA or an RP requesting MFA cannot receive a password-context ID Token when the requirement is unmet.
+29. Applications may trust other IdPs directly; authd does not require identity brokering through authd.
 
 ---
 
@@ -2052,6 +2135,11 @@ login_hint
 PKCE
 ID token validation
 nonce
+acr_values password and MFA requests
+max_age combined with MFA step-up
+unmet_authentication_requirements
+acr/amr claims
+stable sid across refresh and new sid after a new provider login
 email claims, including verified/unverified transitions
 groups claim requested+allowed release
 roles claim requested+allowed release
@@ -2107,9 +2195,11 @@ An application can:
 5. Validate an RS256 ID token from JWKS.
 6. Receive short-lived access token scopes.
 7. Receive groups/roles claims when requested.
-8. Refresh using rotating refresh tokens.
-9. Use /userinfo when needed.
-10. Perform RP-initiated logout.
+8. Request password or MFA authentication context with `acr_values`.
+9. Retain `(iss, sub, sid)` with its local application session.
+10. Refresh using rotating refresh tokens without losing `acr`/`sid` correlation.
+11. Use /userinfo when needed.
+12. Perform RP-initiated logout.
 ```
 
 `bdcmaps` can complete its existing OIDC flow without a provider-specific client-code fork.
@@ -2128,6 +2218,8 @@ Implementation should conform to applicable portions of:
 OpenID Connect Core 1.0
 OpenID Connect Discovery 1.0
 OpenID Connect RP-Initiated Logout 1.0
+OpenID Connect Core Error Code unmet_authentication_requirements 1.0
+OpenID Connect Back-Channel Logout 1.0 (future logout design; back-channel delivery is not v1)
 
 OAuth 2.0 / RFC 6749
 OAuth Token Revocation / RFC 7009
@@ -2147,13 +2239,13 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.7 implementation limits and evidence
+# 45. v0.8 implementation limits and evidence
 
 This revision implements the identity/bootstrap/session/MFA/admin source slice and
 the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
 S256, durable browser continuations, one-use authorization codes, RS256 ID/access
 tokens, UserInfo, rotating refresh families with replay revocation, token
-revocation, RP-initiated logout, and administrator-managed OIDC clients.
+revocation, RP-initiated logout, administrator-managed OIDC clients, `acr_values` step-up enforcement, `acr`/`amr` ID-token context, and stable provider-session `sid` correlation across refresh.
 
 This implementation status is not a conformance or production claim. The authoring
 environment has not executed the real pgx/Argon2 build against PostgreSQL and has

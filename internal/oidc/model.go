@@ -24,6 +24,7 @@ type AuthorizationRequest struct {
 	ClientID      string
 	RedirectURI   string
 	Scopes        []string
+	RequiredACR   string
 	State         string
 	Nonce         string
 	CodeChallenge string
@@ -36,6 +37,7 @@ type AuthorizationRequest struct {
 
 type Subject struct {
 	ID            string
+	SessionID     string
 	Username      string
 	DisplayName   string
 	Email         string

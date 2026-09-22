@@ -18,6 +18,7 @@ type Metadata struct {
 	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
 	ScopesSupported                            []string `json:"scopes_supported"`
 	ClaimsSupported                            []string `json:"claims_supported"`
+	ACRValuesSupported                         []string `json:"acr_values_supported"`
 	AuthorizationResponseISSParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
@@ -42,8 +43,9 @@ func NewMetadata(issuer string) Metadata {
 		ScopesSupported:                   []string{"openid", "profile", "email", "groups", "roles", "offline_access"},
 		ClaimsSupported: []string{
 			"sub", "name", "preferred_username", "email", "email_verified",
-			"groups", "roles", "auth_time", "amr",
+			"groups", "roles", "auth_time", "acr", "amr", "sid",
 		},
+		ACRValuesSupported:                         []string{ACRPassword, ACRMFA},
 		AuthorizationResponseISSParameterSupported: true,
 	}
 }

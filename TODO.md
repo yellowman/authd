@@ -1,4 +1,4 @@
-# Implementation sequence — v0.7
+# Implementation sequence — v0.8
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -26,6 +26,9 @@ actual bdcmaps login remain the first external gates.
 - [x] Client repository and exact redirect/post-logout URI validation.
 - [x] Server-side authorization continuation storage and parallel-login-safe handles.
 - [x] `prompt=none/login`, `max_age`, `login_hint`, nonce, state, and `iss` response.
+- [x] `acr_values` password/MFA context selection, client MFA minimums, and `unmet_authentication_requirements`.
+- [x] ID-token `acr`/`amr` plus stable provider-session `sid` retained across refresh.
+- [x] RP integration contract for `(iss, sub)` linking and application-local authority boundaries.
 - [x] Permission-scope evaluation and requested+allowed groups/roles projection.
 - [x] Single-use authorization codes and PKCE S256 code exchange.
 - [x] `client_secret_basic`, bdcmaps-compatible `client_secret_post`, and public none.

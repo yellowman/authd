@@ -33,8 +33,10 @@ type tokenClaims struct {
 	JWTID         string   `json:"jti,omitempty"`
 	Scope         string   `json:"scope,omitempty"`
 	AuthTime      int64    `json:"auth_time,omitempty"`
+	ACR           string   `json:"acr,omitempty"`
 	Nonce         string   `json:"nonce,omitempty"`
 	AMR           []string `json:"amr,omitempty"`
+	SID           string   `json:"sid,omitempty"`
 	Username      string   `json:"preferred_username,omitempty"`
 	Name          string   `json:"name,omitempty"`
 	Email         string   `json:"email,omitempty"`

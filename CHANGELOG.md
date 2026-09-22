@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8 — RP integration and authentication context
+
+Added a binding relying-party integration contract: durable identity is `(iss, sub)`; mutable profile/role claims are not identity keys; matching email never silently links an existing RP account; and authd authentication never creates application-local tenant, organization, PBX, project, case, boundary, workspace, room, or resource membership. Documented identity-only, hybrid, and authd-authorized RP modes, local-identity coexistence, and the Evident pattern where a product gateway may trust customer OIDC/SAML providers directly rather than forcing federation through authd.
+
+Implemented OIDC authentication context with `acr_values`, `urn:authd:acr:pwd`, `urn:authd:acr:mfa`, client-level MFA minimums, and the finalized `unmet_authentication_requirements` authorization error. Discovery now advertises supported ACRs plus `acr` and `sid` claims. ID Tokens emit the authentication context actually satisfied and the UUID `sid` of the provider login session. Authorization codes and refresh families retain that session ID so refreshed ID Tokens preserve session correlation. RP-initiated logout uses `sid` when present to prevent a same-subject token from ending a different provider session.
+
+Added protocol/store regression coverage for ACR discovery, MFA step-up, unsupported ACRs, stable `sid` across refresh, cross-`sid` logout refusal, client MFA policy precedence, and migration 004. Real PostgreSQL execution and external RP interoperability remain qualification gates.
+
 ## v0.7 — deployment hardening
 
 Separated schema ownership from normal runtime: `authd migrate` is now the explicit DDL path, while daemon and bootstrap startup only verify the exact embedded migration manifest and fail closed on absent, stale, ahead, or altered history. Added a PostgreSQL runtime-grant script/default-privilege recipe so production can use a DML-only authd role without schema ownership or CREATE rights.
