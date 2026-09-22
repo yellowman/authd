@@ -1,0 +1,34 @@
+[Unit]
+Description=authd Identity and OIDC Service
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=_authd
+Group=_authd
+WorkingDirectory=/var/authd
+EnvironmentFile=/etc/authd/authd.env
+ExecStart=/usr/local/bin/authd
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+# authd requires network access and read access to its root-managed runtime
+# configuration. Durable state lives in PostgreSQL; the daemon does not need
+# write access to /etc, /usr, or its working directory.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

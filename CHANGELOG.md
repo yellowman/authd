@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.3 — greenfield native services on OpenBSD and Linux
+
+Added a WaveControl-style Linux systemd unit using the same `/etc/authd/authd.env`, `_authd`, master-key, and `PGPASSFILE` contract as OpenBSD. Added `make install-linux`, common native service-control targets, `make verify-linux`, environment-template parity checks, and systemd unit validation.
+
+Simplified native installation to match the project's greenfield status. `make install-openbsd` and `make install-linux` now create first-install env/master-key state and refuse an existing active installation rather than carrying preservation/merge behavior before an installed-base upgrade contract exists. Service start never generates key material. Staged `DESTDIR` installs still create only package assets/examples.
+
+`DEPLOYMENT.md` now documents one PostgreSQL bootstrap path plus complete OpenBSD rc.d and Linux systemd service setup, shared file permissions, bootstrap, service control, and the current manual update boundary.
+
 ## v0.8.2 — native deployment bootstrap and OpenBSD rc.d
 
 Added a complete `DEPLOYMENT.md` covering fresh PostgreSQL/OpenBSD installation: cluster initialization, dedicated `authd_owner` and `authd_runtime` LOGIN roles, database creation, interactive password assignment, owner-only migrations against the authd database, DML-only runtime grants, persistent master-key/runtime pgpass layout, bootstrap, HTTPS proxy boundary, upgrades, and backup minimums.

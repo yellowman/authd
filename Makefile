@@ -1,4 +1,14 @@
-.PHONY: deps fmt fmt-check test race vet build verify verify-openbsd integration integration-openbsd openbsd-deploy-check offline-check run migrate dev-db dev-db-down install-openbsd install-openbsd-user install-openbsd-files install-openbsd-config install-openbsd-service enable start restart status stop
+# authd build, verification, and native installation workflow.
+#
+# Keep this file in the common GNU make / BSD make subset so the same targets
+# work on Linux and OpenBSD.
+
+GO?=go
+GOFMT?=gofmt
+GOFLAGS?=
+GO_BUILD_FLAGS?=-trimpath
+BUILD_DIR?=bin
+BINARY?=${BUILD_DIR}/authd
 
 DESTDIR?=
 PREFIX?=/usr/local
@@ -10,63 +20,89 @@ CONFDIR?=${SYSCONFDIR}/authd
 ENVFILE?=${CONFDIR}/authd.env
 MASTERKEY?=${CONFDIR}/master.key
 PGPASS_PATH?=${CONFDIR}/pgpass
+RUNDIR?=/var/authd
+SYSTEMD_UNITDIR?=${SYSCONFDIR}/systemd/system
 RCDIR?=${SYSCONFDIR}/rc.d
 RUN_USER?=_authd
 RUN_GROUP?=_authd
+INSTALL_OS?=
+
+.NOTPARALLEL:
+.PHONY: deps fmt fmt-check env-check test race vet build verify verify-openbsd \
+	verify-linux integration integration-openbsd openbsd-deploy-check \
+	linux-deploy-check offline-check run migrate dev-db dev-db-down \
+	install install-openbsd install-linux install-user install-files \
+	install-config install-service enable start restart status stop help
 
 deps:
-	go mod tidy
-	go mod verify
+	${GO} mod tidy
+	${GO} mod verify
 
 fmt:
-	gofmt -w $$(find cmd internal -type f -name '*.go' -print)
+	${GOFMT} -w $$(find cmd internal -type f -name '*.go' -print)
 
 fmt-check:
-	@test -z "$$(gofmt -l $$(find cmd internal -type f -name '*.go' -print))" || { echo "Run make fmt" >&2; exit 1; }
+	@test -z "$$(${GOFMT} -l $$(find cmd internal -type f -name '*.go' -print))" || { echo "Run make fmt" >&2; exit 1; }
+
+env-check:
+	@cmp -s .env.example deploy/openbsd/authd.env.example || { \
+		echo "deploy/openbsd/authd.env.example is out of sync with .env.example" >&2; exit 1; }
+	@cmp -s .env.example deploy/systemd/authd.env.example || { \
+		echo "deploy/systemd/authd.env.example is out of sync with .env.example" >&2; exit 1; }
 
 test:
-	go test ./...
+	${GO} test ./...
 
 race:
-	go test -race ./...
+	${GO} test -race ./...
 
 vet:
-	go vet ./...
+	${GO} vet ./...
 
 build:
-	mkdir -p bin
-	go build -trimpath -o bin/authd ./cmd/authd
+	mkdir -p "${BUILD_DIR}"
+	${GO} build ${GOFLAGS} ${GO_BUILD_FLAGS} -o "${BINARY}" ./cmd/authd
 
 # Requires real dependencies and a marked disposable PostgreSQL database.
 # Missing prerequisites are failures, not successful skipped checks.
-verify: fmt-check test race vet build integration
+verify: fmt-check env-check test race vet build integration
 
 # Go does not support -race on OpenBSD/amd64. This is the native OpenBSD gate;
 # release qualification still requires `make race` on a race-supported platform.
-verify-openbsd: fmt-check test vet build integration-openbsd openbsd-deploy-check
+verify-openbsd: fmt-check env-check test vet build integration-openbsd openbsd-deploy-check
+
+# Native Linux release gate: includes the race detector and systemd-unit check.
+verify-linux: fmt-check env-check test race vet build integration linux-deploy-check
 
 integration:
 	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
 	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
-	go test -race -count=1 -tags=integration ./internal/db
+	${GO} test -race -count=1 -tags=integration ./internal/db
 
 integration-openbsd:
 	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
 	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
-	go test -count=1 -tags=integration ./internal/db
+	${GO} test -count=1 -tags=integration ./internal/db
 
 openbsd-deploy-check:
 	@ksh -n deploy/openbsd/rc.d/authd
 	@ksh -n .env.example
 
+linux-deploy-check:
+	@command -v systemd-analyze >/dev/null 2>&1 || { echo "systemd-analyze required" >&2; exit 1; }
+	@tmp=`mktemp /tmp/authd.XXXXXX.service`; \
+	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
+	sed -e 's#^ExecStart=.*#ExecStart=/bin/true#' -e 's#^EnvironmentFile=.*#EnvironmentFile=-/dev/null#' deploy/systemd/authd.service > "$$tmp"; \
+	systemd-analyze verify "$$tmp"
+
 offline-check:
 	./scripts/check-offline.sh
 
 run:
-	go run ./cmd/authd
+	${GO} run ./cmd/authd
 
 migrate:
-	go run ./cmd/authd migrate
+	${GO} run ./cmd/authd migrate
 
 dev-db:
 	docker compose -f compose.dev.yml up -d postgres
@@ -74,35 +110,64 @@ dev-db:
 dev-db-down:
 	docker compose -f compose.dev.yml down
 
-install-openbsd: install-openbsd-user install-openbsd-files install-openbsd-config install-openbsd-service
+# Generic native install. This is intentionally a greenfield installer: it
+# refuses to replace an existing active env/master key instead of pretending
+# to implement an upgrade/merge policy.
+install: env-check install-user install-files install-config install-service
 	@echo ""
-	@echo "authd installed for OpenBSD."
+	@echo "authd installed."
 	@echo "Complete ${ENVFILE} and ${PGPASS_PATH}, then follow ${DOCDIR}/DEPLOYMENT.md."
 
-install-openbsd-user:
+install-openbsd:
+	@${MAKE} INSTALL_OS=OpenBSD install
+
+install-linux:
+	@${MAKE} INSTALL_OS=Linux install
+
+install-user:
 	@if [ -n "${DESTDIR}" ]; then \
 		echo "==> staged install: not creating ${RUN_USER}"; \
 		exit 0; \
 	fi; \
-	if ! grep -q '^${RUN_GROUP}:' /etc/group; then groupadd "${RUN_GROUP}"; fi; \
+	os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	if ! grep -q '^${RUN_GROUP}:' /etc/group; then \
+		case "$$os" in \
+		Linux) groupadd -r "${RUN_GROUP}" ;; \
+		OpenBSD) groupadd "${RUN_GROUP}" ;; \
+		*) echo "unsupported install host: $$os (supported: Linux, OpenBSD)" >&2; exit 1 ;; \
+		esac; \
+	fi; \
 	if ! id "${RUN_USER}" >/dev/null 2>&1; then \
-		useradd -g "${RUN_GROUP}" -d /var/empty -s /sbin/nologin "${RUN_USER}"; \
+		case "$$os" in \
+		Linux) \
+			nologin=/usr/sbin/nologin; [ -x "$$nologin" ] || nologin=/sbin/nologin; \
+			useradd -r -g "${RUN_GROUP}" -d "${RUNDIR}" -s "$$nologin" -M "${RUN_USER}" ;; \
+		OpenBSD) \
+			useradd -g "${RUN_GROUP}" -d "${RUNDIR}" -s /sbin/nologin "${RUN_USER}" ;; \
+		*) echo "unsupported install host: $$os (supported: Linux, OpenBSD)" >&2; exit 1 ;; \
+		esac; \
 	fi; \
 	if [ `id -gn "${RUN_USER}"` != "${RUN_GROUP}" ]; then \
 		echo "${RUN_USER} exists with an unexpected primary group" >&2; exit 1; \
-	fi
+	fi; \
+	home=`awk -F: -v user="${RUN_USER}" '$$1 == user { print $$6; exit }' /etc/passwd`; \
+	if [ "$$home" != "${RUNDIR}" ]; then \
+		echo "${RUN_USER} exists with home $$home; authd requires ${RUNDIR}" >&2; exit 1; \
+	fi; \
+	install -d -m 0750 -o root -g "${RUN_GROUP}" "${RUNDIR}"
 
-install-openbsd-files:
-	@test -x bin/authd || { echo "bin/authd is missing; run make build" >&2; exit 1; }
+install-files:
+	@test -x "${BINARY}" || { echo "${BINARY} is missing; run make build" >&2; exit 1; }
 	@echo "==> installing authd binary and documentation"
 	@install -d -m 0755 "${DESTDIR}${BINDIR}" "${DESTDIR}${SHAREDIR}/postgresql" "${DESTDIR}${DOCDIR}"
-	@install -m 0755 bin/authd "${DESTDIR}${BINDIR}/authd"
+	@install -m 0755 "${BINARY}" "${DESTDIR}${BINDIR}/authd"
 	@install -m 0644 README.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md "${DESTDIR}${DOCDIR}/"
 	@install -m 0644 deploy/openbsd/README.md "${DESTDIR}${DOCDIR}/OPENBSD.md"
+	@install -m 0644 deploy/systemd/README.md "${DESTDIR}${DOCDIR}/LINUX.md"
 	@install -m 0644 deploy/postgresql/create-database.sql deploy/postgresql/runtime-grants.sql deploy/postgresql/README.md "${DESTDIR}${SHAREDIR}/postgresql/"
 
-install-openbsd-config:
-	@echo "==> installing authd configuration templates"
+install-config:
+	@echo "==> installing authd configuration"
 	@install -d -m 0750 "${DESTDIR}${CONFDIR}"
 	@install -m 0640 .env.example "${DESTDIR}${CONFDIR}/authd.env.example"
 	@install -m 0640 deploy/openbsd/pgpass.example "${DESTDIR}${CONFDIR}/pgpass.example"
@@ -110,39 +175,77 @@ install-openbsd-config:
 		echo "staged install: active env, pgpass, and master key are not created"; \
 		exit 0; \
 	fi; \
-	chown root:"${RUN_GROUP}" "${CONFDIR}" "${CONFDIR}/authd.env.example" "${CONFDIR}/pgpass.example"; \
-	if [ -e "${ENVFILE}" ]; then \
-		chmod 0640 "${ENVFILE}"; chown root:"${RUN_GROUP}" "${ENVFILE}"; \
-		echo "preserving existing ${ENVFILE}"; \
-	else \
-		install -m 0640 -o root -g "${RUN_GROUP}" .env.example "${ENVFILE}"; \
-		echo "created ${ENVFILE}; edit it before first start"; \
+	if [ -e "${ENVFILE}" ] || [ -e "${MASTERKEY}" ]; then \
+		echo "active authd configuration already exists; this is a greenfield-only installer" >&2; \
+		echo "remove/review ${ENVFILE} and ${MASTERKEY} explicitly before reinstalling" >&2; \
+		exit 1; \
 	fi; \
-	if [ -e "${MASTERKEY}" ]; then \
-		chmod 0400 "${MASTERKEY}"; chown "${RUN_USER}":"${RUN_GROUP}" "${MASTERKEY}"; \
-		echo "preserving existing ${MASTERKEY}"; \
-	else \
-		tmp="${MASTERKEY}.new.$$$$"; umask 077; ./scripts/generate-master-key.sh > "$$tmp"; \
-		install -m 0400 -o "${RUN_USER}" -g "${RUN_GROUP}" "$$tmp" "${MASTERKEY}"; rm -f "$$tmp"; \
-		echo "generated persistent ${MASTERKEY}"; \
-	fi
+	chown root:"${RUN_GROUP}" "${CONFDIR}" "${CONFDIR}/authd.env.example" "${CONFDIR}/pgpass.example"; \
+	install -m 0640 -o root -g "${RUN_GROUP}" .env.example "${ENVFILE}"; \
+	tmp="${MASTERKEY}.new.$$$$"; umask 077; ./scripts/generate-master-key.sh > "$$tmp"; \
+	install -m 0400 -o "${RUN_USER}" -g "${RUN_GROUP}" "$$tmp" "${MASTERKEY}"; rm -f "$$tmp"; \
+	echo "created ${ENVFILE} and ${MASTERKEY}; edit the env file before first start"
 
-install-openbsd-service:
-	@echo "==> installing OpenBSD rc.d service"
-	@install -d -m 0755 "${DESTDIR}${RCDIR}"
-	@install -m 0555 deploy/openbsd/rc.d/authd "${DESTDIR}${RCDIR}/authd"
+install-service:
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) \
+		echo "==> installing systemd service"; \
+		install -d -m 0755 "${DESTDIR}${SYSTEMD_UNITDIR}"; \
+		install -m 0644 deploy/systemd/authd.service "${DESTDIR}${SYSTEMD_UNITDIR}/authd.service" ;; \
+	OpenBSD) \
+		echo "==> installing OpenBSD rc.d service"; \
+		install -d -m 0755 "${DESTDIR}${RCDIR}"; \
+		install -m 0555 deploy/openbsd/rc.d/authd "${DESTDIR}${RCDIR}/authd" ;; \
+	*) echo "unsupported install host: $$os (supported: Linux, OpenBSD)" >&2; exit 1 ;; \
+	esac
 
 enable:
-	@rcctl enable authd
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) systemctl daemon-reload && systemctl enable authd ;; \
+	OpenBSD) rcctl enable authd ;; \
+	*) echo "unsupported service host: $$os" >&2; exit 1 ;; \
+	esac
 
 start:
-	@rcctl start authd
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) systemctl start authd ;; \
+	OpenBSD) rcctl start authd ;; \
+	*) echo "unsupported service host: $$os" >&2; exit 1 ;; \
+	esac
 
 restart:
-	@rcctl restart authd
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) systemctl daemon-reload && systemctl restart authd ;; \
+	OpenBSD) rcctl restart authd ;; \
+	*) echo "unsupported service host: $$os" >&2; exit 1 ;; \
+	esac
 
 status:
-	@rcctl check authd
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) systemctl status authd ;; \
+	OpenBSD) rcctl check authd ;; \
+	*) echo "unsupported service host: $$os" >&2; exit 1 ;; \
+	esac
 
 stop:
-	@rcctl stop authd
+	@os="${INSTALL_OS}"; [ -n "$$os" ] || os=`uname -s`; \
+	case "$$os" in \
+	Linux) systemctl stop authd ;; \
+	OpenBSD) rcctl stop authd ;; \
+	*) echo "unsupported service host: $$os" >&2; exit 1 ;; \
+	esac
+
+help:
+	@printf '%s\n' \
+		'make build                    Build authd' \
+		'make verify                   Run full test/race/vet/PostgreSQL gate' \
+		'make verify-openbsd           Native OpenBSD gate (no race detector)' \
+		'make verify-linux             Native Linux/systemd gate' \
+		'make install-openbsd          Fresh OpenBSD install' \
+		'make install-linux            Fresh Linux/systemd install' \
+		'make enable|start|restart     Manage installed service for current OS'

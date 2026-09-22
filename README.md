@@ -7,18 +7,18 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-## v0.8.2 — complete native deployment bootstrap
+## v0.8.3 — greenfield native deployment on OpenBSD and Linux
 
-v0.8.2 adds the missing greenfield deployment path on top of the externally qualified v0.8.1 core. It now documents and supplies PostgreSQL database/LOGIN-role creation, owner-only migrations, DML-only runtime grants, persistent runtime credential/key layout, and a native OpenBSD `rc.d` service that preserves the process environment across privilege drop. The v0.8.1 external run completed bootstrap, web login, client registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo, and refresh rotation against PostgreSQL. The new v0.8.2 deployment artifacts themselves still require a native install/boot rerun; see `VALIDATION.md`.
+v0.8.3 keeps the v0.8.2 PostgreSQL/OpenBSD deployment work and adds the same native service contract for Linux/systemd. The installer is now explicitly greenfield-only: it creates initial runtime state and refuses an existing active env/master-key pair instead of carrying upgrade-preservation logic before the project has an installed base. The v0.8.1 external run completed bootstrap, web login, client registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo, and refresh rotation against PostgreSQL. Native OpenBSD/Linux install and service-manager qualification remain external gates; see `VALIDATION.md`.
 
 Implemented in this revision:
 
-- Added `DEPLOYMENT.md` with a complete PostgreSQL/OpenBSD greenfield sequence from cluster initialization through database/LOGIN-role creation, schema migration, runtime grants, persistent secrets, bootstrap, rc.d enable/start, and reverse proxying.
+- `DEPLOYMENT.md` now covers a common greenfield PostgreSQL/bootstrap path plus native OpenBSD `rc.d` and Linux `systemd` service installation.
 - Added `deploy/postgresql/create-database.sql` for dedicated `authd_owner` / `authd_runtime` LOGIN roles and the authd database without embedding passwords.
-- Added a WaveControl-style OpenBSD `rc.d` service that sources `/etc/authd/authd.env` with `set -a` before and after the rc.d privilege transition so runtime environment variables reach the `_authd` daemon.
-- Added `make install-openbsd` plus native service-control targets. Existing env/master-key files are preserved; the master key is generated only on first install.
+- OpenBSD keeps the WaveControl-style `rc.d` env propagation; Linux now has the corresponding WaveControl-style systemd unit using the same `/etc/authd/authd.env` contract.
+- Added common native install/service targets plus `make install-openbsd` and `make install-linux`; the greenfield installer creates first-use env/master-key files and refuses existing active state.
 - `authd migrate` now requires only `DATABASE_URL`, keeping the migration-owner credential and daemon master key/issuer configuration separate.
-- OpenBSD runtime PostgreSQL credentials may use `_authd`-only `/etc/authd/pgpass` via `PGPASSFILE`, avoiding a password embedded in `DATABASE_URL`.
+- Native runtime PostgreSQL credentials may use `_authd`-only `/etc/authd/pgpass` via `PGPASSFILE`, avoiding a password embedded in `DATABASE_URL` on either OpenBSD or Linux.
 - OIDC `acr_values` handling with `urn:authd:acr:pwd` and `urn:authd:acr:mfa`, client-level MFA minimums, and `unmet_authentication_requirements` when the requested context cannot be satisfied.
 - ID Tokens now emit actual `acr`/`amr` plus stable provider-session `sid`; refresh families retain the originating `sid`.
 - RP-initiated logout checks `sid` when present so one same-subject provider session cannot terminate another.
@@ -118,7 +118,7 @@ credentials and sessions are under `/account`.
 Keep the master key. It encrypts TOTP seeds and OIDC signing private keys. Changing
 or losing it makes those encrypted values unreadable.
 
-For production, follow [`DEPLOYMENT.md`](DEPLOYMENT.md). It covers the complete PostgreSQL cluster/database/role bootstrap and OpenBSD service installation. Use separate PostgreSQL migration/owner and runtime roles; the runtime role needs DML but not schema ownership/CREATE privileges. Run `authd migrate` with the owner connection, apply `deploy/postgresql/runtime-grants.sql` to the authd database, then keep only the runtime connection in the daemon environment.
+For production, follow [`DEPLOYMENT.md`](DEPLOYMENT.md). It covers the complete PostgreSQL cluster/database/role bootstrap plus OpenBSD rc.d and Linux systemd installation. Use separate PostgreSQL migration/owner and runtime roles; the runtime role needs DML but not schema ownership/CREATE privileges. Run `authd migrate` with the owner connection, apply `deploy/postgresql/runtime-grants.sql` to the authd database, then keep only the runtime connection in the daemon environment.
 
 When authd is behind a reverse proxy, leave forwarded-header trust disabled unless the
 direct proxy addresses are known. Configure only those networks, for example:

@@ -3,7 +3,7 @@
 # OpenBSD rc.d service for authd.
 #
 # The service environment is loaded from a root-controlled file rather than
-# encoded in rcctl flags. This preserves DATABASE_URL and authd configuration
+# encoded in rcctl flags. This carries DATABASE_URL and authd configuration
 # across rcctl start/restart while keeping secrets out of rc.conf.local.
 
 daemon="/usr/local/bin/authd"

@@ -15,4 +15,4 @@ authd_owner           -> authd migrate + runtime-grants.sql
 authd_runtime         -> authd bootstrap + normal daemon
 ```
 
-The migration-owner password/DSN must not be stored in the daemon environment. The OpenBSD deployment uses `PGPASSFILE=/etc/authd/pgpass` for the runtime credential by default.
+The migration-owner password/DSN must not be stored in the daemon environment. Native OpenBSD and Linux deployments use `PGPASSFILE=/etc/authd/pgpass` for the runtime credential by default.
