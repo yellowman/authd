@@ -1,3 +1,64 @@
+# Validation record — v0.9.3 operator interface and native-form fix
+
+Base: `c3a0cab` (the delivered v0.9.2 archive used for this update). The user
+supplied `authd(1).diff`, changing the web and OIDC interaction response policy
+from `no-referrer` to `origin`. That runtime fix is incorporated, with broader
+header/refusal tests and explanatory UI rather than relaxed origin/CSRF checks.
+This update also adds operator guides, saved-client connection details, and an
+admin-only Start here view. No new migration or Go runtime dependency was added.
+
+## v0.9.3 checks performed here
+
+Environment: Linux/amd64, Go 1.23.2, Python Playwright 1.57.0, system Chromium
+144.0.7559.96. Production Go minimum remains 1.26.0. All fixture credentials are
+synthetic. No live database, installed service, BDC instance or remote repository
+was changed.
+
+| Check | Result and boundary |
+|---|---|
+| Header regressions against the unpatched v0.9.2 responses | Expected FAIL: setup, login, account and admin plus consent and logout interactions returned `no-referrer`. This checks response headers, not native browser behavior. |
+| Actual stdlib component tests under `-race`, plus vet | PASS: config, crypto, identity, listener, db, OIDC, TOTP and web; unchanged partial offline gate. |
+| Password parser and SQL integration-body typecheck | PASS: parser only, not Argon2 derivation; SQL test bodies compile but were NOT executed. |
+| New operator/refusal tests | PASS: live admin authorization, no full catalog scan for the guide, section help, saved values versus malicious Host, HTML escaping, client reveal instructions, opaque/foreign-origin rejection, and separate origin/CSRF recovery messages. |
+| Browser-tag Go source / vet | PASS: compiles and vets the optional fixture harnesses. Not proof of browser submission. |
+| 24 Chromium-rendered layout cases | PASS: actual Go-rendered HTML/CSS at 1440px and 390px; all admin sections, selected client, account, setup and login; no document-width overflow. HTML is fetched by Python and rendered with `set_content`. |
+| Native Chromium forms | BLOCKED / NOT QUALIFIED: `TestBrowserNativeWebForms` and `TestBrowserNativeConsentAndLogout` fail initial navigation with `ERR_BLOCKED_BY_ADMINISTRATOR` under the managed browser policy. No native POST result is claimed. |
+| Documentation, package and static checks | See retained log: shell-block syntax, local links, env parity, installer doc inclusion, formatting, unchanged runtime-boundary files and static systemd verification. A staged install uses `/bin/true` as a packaging fixture, never as an alternate authd executable. |
+
+The layout-only witness is intentionally separate. It does **not** establish
+browser Origin/Referer generation, cookies on navigation, native CSRF submission,
+OIDC callback success or PostgreSQL behavior. The complete native browser gate is
+implemented in `make browser-check`; missing/blocked browser dependencies are a
+nonzero failure, not a skipped pass. No enterprise browser policies were changed
+or bypassed to obtain the layout result. See [BROWSER_TESTS.md](docs/BROWSER_TESTS.md)
+for the exact procedures and Fetch/Referrer-Policy references.
+
+The same offline method used by earlier releases tests the actual stdlib-only
+packages via a temporary Go 1.23 modfile outside the checkout. No module
+replacement, fake pgx or fake production Argon2 module is used. The production
+module build and a new PostgreSQL run remain unexecuted here; the user's earlier
+v0.9.0 external pass below is retained, not relabeled as testing this revision.
+
+## v0.9.3 retained evidence
+
+- [Before header correction](docs/validation/v0.9.3/before-headers.log).
+- [Final partial component/race/vet gate](docs/validation/v0.9.3/offline.log).
+- [Opt-in browser-tag vet](docs/validation/v0.9.3/browser-vet.log).
+- [Native-browser environment refusal](docs/validation/v0.9.3/native-browser-blocked.log).
+- [Layout-only Chromium result](docs/validation/v0.9.3/layout.log).
+- [Layout-only JSON manifest of coverage](docs/validation/v0.9.3/layout-browser.json).
+- [Authoring environment](docs/validation/v0.9.3/environment.log).
+- [Documentation / installation / invariance checks](docs/validation/v0.9.3/static-checks.log).
+
+Build/install/restart and reload pre-update pages. There is no database migration,
+rebootstrap, client-secret change, master-key replacement, listener change or
+native-service-definition change for this tranche. Existing BDC scope/group
+settings are instructions, not an automatic reconfiguration or new live BDC test.
+
+---
+
+# Historical release evidence
+
 # Validation record — v0.9.2 Unix transport
 
 Base: `59950b1` (delivered v0.9.1). This tranche changes the native HTTP listener,

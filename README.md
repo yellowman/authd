@@ -1,241 +1,95 @@
 # authd
 
-A small Go identity and access service backed by PostgreSQL. Own users, primary
-credentials, roles, permissions, MFA, provider sessions, and OIDC once; let many
-applications consume the same identity. The first relying-party target is
-`yellowman/bdcmaps`.
+**One place to manage people, passwords, MFA, and application sign-in.**
+A small Go service backed by PostgreSQL, with a server-rendered administration UI.
+No LDAP, user YAML, frontend build system, or external policy service.
 
-Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
+## Start here
 
-## v0.9.2 — Unix-socket HTTP listener and native service wiring
+| What you are trying to do | Read / open |
+|---|---|
+| Understand the app and connect the first application | [Operator guide](OPERATOR_GUIDE.md), or **Administration → Start here** in the browser |
+| Install from a new PostgreSQL host | [Deployment guide](DEPLOYMENT.md) |
+| Connect BDC Maps | [Two-sided BDC walkthrough](docs/BDCMAPS_INTEGRATION.md) |
+| Use a Unix socket behind nginx | [Unix sockets](docs/UNIX_SOCKET.md) |
+| Integrate another application | [RP integration contract](docs/RP_INTEGRATION.md) |
+| Upgrade an installed server | [Upgrade procedure](DEPLOYMENT.md#13-updating-an-existing-installation) |
+| Find changes and test coverage | [Changelog](CHANGELOG.md), [validation record](VALIDATION.md) |
 
-The HTTP server now supports `AUTHD_LISTEN='unix:/run/authd/authd.sock'` (or a
-bare absolute path) as well as the existing TCP address. This is real listener
-support, not a configuration alias for TCP. See [`docs/UNIX_SOCKET.md`](docs/UNIX_SOCKET.md)
-for socket mode/group, source-IP trust, Linux/OpenBSD runtime directories, nginx
-chroot paths and a staged cutover that does not repoint the proxy before the
-socket is ready. Public OIDC identity remains HTTPS.
+## What it does
 
-The socket defaults to owner-only `0600`. Use `0660` with a distinct `authd_proxy`
-group for a separate proxy worker; never give that worker the `_authd` secrets
-group. Forwarded IPs on Unix peers require `AUTHD_TRUST_UNIX_PROXY=true` and a
-proxy that overwrites incoming forwarding headers. Lifetime locking, restrictive
-publication, stale-path recovery and inode-safe cleanup are tested. OpenBSD now
-uses the normal rc.subr background/start path with an env-loading exec launcher;
-Linux gets a sandboxed `/run/authd` runtime directory.
-
-There is no new migration or dependency. Existing env/key/pgpass and TCP defaults
-are preserved. This runtime change needs a new binary and restart; the earlier
-v0.9.0 reported PostgreSQL pass does not qualify its native service behavior.
-The validation record distinguishes actual Linux socket/proxy tests from
-unexecuted full-build, PostgreSQL and native deployment gates.
-
-## Historical v0.9.1 — deployment instructions and qualification record
-
-This is a documentation-only follow-up to v0.9.0. PostgreSQL administration now
-uses `psql -Upostgres` with an explicit target database and a documented SQL
-password-assignment step. The source, dependencies, migrations, privilege SQL,
-Makefile and service definitions that the tester qualified are unchanged; no new
-migration, password reset or service restart is required for this update.
-
-A user-supplied report for v0.9.0 states that `make verify-openbsd`, fresh
-PostgreSQL database/role creation, owner migration, runtime grants/bootstrap and a
-live OIDC flow passed. The raw command logs were not supplied and this was not
-independently rerun here. See [`VALIDATION.md`](VALIDATION.md) for the report and
-what remains untested: actual bdcmaps, HTTPS/proxying, native services, live MFA and
-Linux race/systemd qualification, among the remaining release gates.
-
-## v0.9.0 — OIDC protocol and grant-transaction audit
-
-This release fixes the authorization and token lifecycle, rather than merely
-adding metadata or changing UI labels. Read [`docs/OIDC_AUDIT.md`](docs/OIDC_AUDIT.md)
-for reproduced findings, implementation locations, regressions and performance
-measurements. See [`VALIDATION.md`](VALIDATION.md) for the exact execution boundary.
-
-Key changes: browser-bound GET/POST authorization and consent; standards-correct
-ACR preferences versus essential requirements; selective normal claims;
-transactional code redemption/signing/refresh issuance; code-replay descendant
-revocation; transactional refresh rollback; live secret/session checks; honest
-503 dependency failures; JWT type separation and strict parsing; confirmation for
-unhinted/cross-session logout; bounded key caches and database maintenance.
-
-**Upgrade attention:** migration 005 restarts pending login transactions and
-unused authorization codes, while preserving users, secrets, sessions and offline
-families. Check for permission names colliding with reserved identity scopes
-before migration. Access tokens issued with the older `typ=JWT` are no longer
-accepted at UserInfo; reauthorize/refresh as needed. Mandatory MFA requires client
-policy or an essential `claims` selector, not `acr_values` alone. Offline access
-requires `prompt=consent`. Full procedure: [`DEPLOYMENT.md`](DEPLOYMENT.md).
-
-The original local stdlib-based regression/race/vet gate passed. The subsequent
-external v0.9.0 report also states that the real PostgreSQL integration gate and
-live provider flow passed. This is no longer limited to an earlier revision's
-external result; it remains reported test evidence, not an OpenID conformance
-certificate or production signoff.
-
-Local users, roles, permissions, password/TOTP/recovery, administrator CRUD,
-client registration, signing-key rotation, audit/session views, OpenBSD rc.d,
-Linux systemd and repeatable native install behavior remain part of the app.
-
-## Dependencies and boundaries
-
-Only two direct external Go modules are selected:
+Create a **user** for each person. Register a **client** for each application.
+Assign **roles** to people. Applications can either map those role names to their
+own roles, or request/check fine-grained **permission scopes**.
 
 ```text
-github.com/jackc/pgx/v5    PostgreSQL database/sql driver
-golang.org/x/crypto        Argon2id
+Person opens an application
+  → application redirects to authd
+  → person signs in (password + optional authenticator)
+  → application receives and verifies an OIDC result
+  → application applies its own access policy
 ```
 
-HTTP, JWT/JWK framing, PKCE, TOTP framing, and the identity/control layers use the
-standard library around those cryptographic/database primitives. There is no ORM,
-frontend package manager, Redis, message bus, or external policy service.
+The first BDC Maps integration uses group/role mapping; it does **not** require a
+new permission catalog. authd's `system-admin` role manages authd, not BDC. A client
+secret belongs in the application's backend configuration, not a user's login.
+The browser UI explains those distinctions beside the controls.
 
-OIDC and future RADIUS/TACACS+ adapters consume the same identity model but have
-separate protocol registrations. The canonical password remains a one-way Argon2id
-verifier; no recoverable primary password or NT hash is introduced for future AAA.
+Identity is `(issuer, subject)`, never email alone. Customer/tenant/PBX/project/room
+membership stays in the application. An enabled account is not automatically a
+member of every app. Conversely, a client that requests only identity may
+authenticate any enabled authd user; there is no separate client allowed-users
+list. Read the [operator guide](OPERATOR_GUIDE.md) before choosing a policy.
 
-## Build and first use
+## Current release: v0.9.3
 
-Use Go 1.26 or newer and PostgreSQL. `golang.org/x/crypto v0.57.0` requires Go 1.26.
-The dependency lockfile is committed. `make deps` runs `go mod download` and `go mod verify`; it should leave the module files clean:
+Includes the reported native-form fix (`Referrer-Policy: origin`), an operator-first
+admin landing page, explanatory field help, saved client connection details, and
+an installed daily-use guide. Origin and CSRF validation remain in place. There
+is no database migration, dependency update, transport change, or automatic
+reconfiguration of BDC. This is a code/template change: build/install/restart to
+serve it; reopening a previously loaded page is also required.
+
+## Build and test
+
+Go 1.26+ is required by the pinned dependency graph. The only direct Go
+dependencies are `pgx/v5` and `golang.org/x/crypto`; see `go.mod` / `go.sum`.
 
 ```sh
 make deps
 make build
-make dev-db
-export DATABASE_URL='postgres://authd:authd-dev-only@127.0.0.1:55432/authd?sslmode=disable'
-export AUTHD_ISSUER='http://127.0.0.1:8080'
-export AUTHD_LISTEN='127.0.0.1:8080'
-export AUTHD_DEVELOPMENT=true
-umask 077
-./scripts/generate-master-key.sh > authd-master.key
-export AUTHD_MASTER_KEY_FILE="$PWD/authd-master.key"
-./bin/authd migrate
-./bin/authd bootstrap
-./bin/authd
+make test
 ```
 
-`authd migrate` is the only normal executable path that performs schema DDL.
-`authd bootstrap` and the daemon verify that every embedded migration is present
-and fail closed when the database is behind or its migration history differs.
-`authd bootstrap` prints a one-time 30-minute setup token to the invoking terminal. Open `/setup`, create the initial administrator, then
-sign in at `/login`. Identity administration is under `/admin/`; personal
-credentials and sessions are under `/account`.
-
-Keep the master key. It encrypts TOTP seeds and OIDC signing private keys. Changing
-or losing it makes those encrypted values unreadable.
-
-For production, follow [`DEPLOYMENT.md`](DEPLOYMENT.md). It covers the complete PostgreSQL cluster/database/role bootstrap plus OpenBSD rc.d and Linux systemd installation. Use separate PostgreSQL migration/owner and runtime roles; the runtime role needs DML but not schema ownership/CREATE privileges. Run `authd migrate` with the owner connection, apply `deploy/postgresql/runtime-grants.sql` to the authd database, then keep only the runtime connection in the daemon environment.
-
-When authd is behind a reverse proxy, leave forwarded-header trust disabled unless the
-direct proxy addresses are known. Configure only those networks, for example:
+Full qualification needs a disposable PostgreSQL instance and its explicitly
+marked test environment, as described in `DEPLOYMENT.md`:
 
 ```sh
-export AUTHD_TRUSTED_PROXIES='127.0.0.1/32,::1/128'
+make verify-openbsd     # native OpenBSD checks; no unsupported -race
+make verify-linux       # unit/race/vet/build/real PostgreSQL + unit-file syntax
+make browser-check     # separate native-form Chromium gate; needs Python Playwright
 ```
 
-`X-Forwarded-For` is ignored from every other peer. For a trusted proxy chain, authd
-walks right-to-left and uses the nearest untrusted address as the client source. Login
-rate limits remain process-local, so a multi-instance deployment requires a different
-rate-limit design rather than merely widening this proxy list.
+The browser tests use the actual HTTP handlers and templates with synthetic
+persistence/credentials. They do not replace real PostgreSQL, the Argon2 KDF,
+nginx, or the actual BDC callback. Browser tooling is a test dependency only;
+authd serves its normal UI without JavaScript or a browser-testing runtime.
+See [browser test instructions](docs/BROWSER_TESTS.md) and `VALIDATION.md`.
 
-### Register bdcmaps
+Install and update with `make install-openbsd` or `make install-linux` on the
+corresponding host. Active configuration, database credentials, and the master key
+are preserved. `authd migrate` is a separate owner-credential command; the daemon
+runs as `_authd` with `authd_runtime` database rights. Follow `DEPLOYMENT.md` rather
+than using these targets as a substitute for initial database/service setup.
 
-After signing in as an administrator:
+## Boundaries
 
-1. Open **Clients**.
-2. Register a confidential client with client ID `bdcmaps`.
-3. Register the exact `https://<bdcmaps-origin>/auth/callback` redirect.
-4. Allow `openid`, `profile`, `email`, and `groups`.
-5. Copy the one-time secret into bdcmaps' existing `OIDC_CLIENT_SECRET` runtime
-   secret and configure its issuer/client/redirect settings.
+Authorization Code + PKCE, RS256, TOTP/recovery, consent, rotating refresh tokens,
+UserInfo, and RP-initiated logout are implemented. Back-channel logout, upstream
+OIDC/SAML federation, RADIUS/TACACS, passkeys, and machine-identity grants are not
+implemented. Other apps may accept their own trusted providers directly.
 
-The current bdcmaps code sends the secret using `client_secret_post`; authd accepts
-that for compatibility. New clients should prefer `client_secret_basic` when their
-OIDC library supports it. See `docs/BDCMAPS_INTEGRATION.md`.
-
-## Verification
-
-Full qualification requires **real dependencies and a marked disposable
-PostgreSQL database**:
-
-```sh
-export AUTHD_TEST_DISPOSABLE=1
-export AUTHD_TEST_DATABASE_URL='postgres://authd:authd-dev-only@127.0.0.1:55432/authd?sslmode=disable'
-make verify
-```
-
-On OpenBSD/amd64, where the Go race detector is unavailable, use:
-
-```sh
-make verify-openbsd
-```
-
-A release still requires `make race` on a Go platform that supports the race detector.
-
-The database suite creates and removes a unique `authd_it_*` schema. Missing test
-configuration is a failure, never a skip. In addition to the v0.4 identity cases,
-the integration source now covers client registration, durable authorization
-requests, one-use codes, refresh rotation/reuse-family revocation, token audit
-events, refusal of `system.admin` as an application scope, and signing-key
-rotation/retired-private-key destruction.
-
-`make offline-check` is deliberately partial. It runs the real stdlib-only unit,
-race and vet paths plus SQL integration-body typechecking, but it cannot replace a
-real pgx/Argon2 build or execute PostgreSQL transactions. The OIDC HTTP tests do
-exercise real RSA signing/JWK/JWT code and in-memory protocol persistence, including
-the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
-
-## Current limits
-
-- The real PostgreSQL/dependency-backed v0.9.0 gate and live OIDC flow passed
-  according to the external report, not an authoring-environment rerun. Actual
-  bdcmaps interoperability and production deployment checks remain external gates.
-- Normal online access uses registered-client policy; explicit browser-bound
-  consent is implemented and required for offline access in this release.
-- Signing-key inventory and manual rotation are implemented; automatic rotation and
-  an explicit public-key deletion/retention schedule remain.
-- Pagination, TOTP QR rendering, safe break-glass recovery, backup/restore, and
-  master-key rotation remain. Admin edit forms carry row versions and stale concurrent
-  saves are rejected transactionally.
-- JWT access tokens intentionally remain valid until their short expiry after a
-  user/session change; refresh and new authorization re-evaluate current grants.
-- Rate limits are process-local and deployments currently assume one active authd
-  instance. TCP forwarded IPs require configured trusted-proxy CIDRs; Unix peers
-  require the separate explicit Unix-proxy trust option described in the socket guide.
-- OIDC conformance-suite and independent third-party client coverage remain
-  qualification work; passing our protocol tests is not a conformance certificate.
-
-## Next qualification
-
-Next exercise the actual `yellowman/bdcmaps` callback against authd and qualify
-the production-facing OpenBSD path: HTTPS/nginx/secure cookies/trusted proxy
-headers, native service installation and live TOTP step-up. The reported fresh
-owner/runtime setup passes; explicit negative-privilege tests and native-service
-credential handling still need evidence. Run the race suite on a supported Go
-platform and an independent OIDC interoperability/conformance suite before a
-production candidate. RADIUS remains PAP-first unless a concrete device forces
-explicit legacy credential support.
-
-## Repository map
-
-```text
-cmd/authd/            server and explicit bootstrap command
-internal/listener/    TCP/Unix HTTP transport, lifecycle and filesystem safety
-internal/identity/    identity service, contracts, validation, rate limits
-internal/password/    Argon2id verifier and bounded encoding parser
-internal/cryptoutil/  random tokens, hashes, CSRF MAC, authenticated encryption
-internal/db/          PostgreSQL repositories, migrations, integration tests
-internal/totp/        OTP encoding and verification
-internal/web/         provider-operated forms and security middleware
-internal/oidc/        OIDC/OAuth protocol, JWT/JWK, tokens, client administration
-internal/protocol/    future AAA adapter boundary
-deploy/postgresql/    greenfield database/role bootstrap + runtime grants
-deploy/openbsd/       rc.d service, env-loading launcher and pgpass example
-deploy/systemd/       Linux unit and canonical environment example
-deploy/nginx/         HTTPS-to-Unix proxy example
-```
-
-`SPEC.md` is the product contract. `TODO.md` distinguishes implemented source from
-qualification and later operational work. `DESIGN_LANGUAGE.md` defines the adapted
-Liminal UI language.
+`SPEC.md` states the contract; `ARCHITECTURE.md` describes ownership boundaries;
+`DESIGN_LANGUAGE.md` guides UI changes. The prior externally reported v0.9.0
+PostgreSQL/live-provider pass and later local checks have separate evidence in
+`VALIDATION.md`. No OpenID certification or production approval is implied.

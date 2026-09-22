@@ -1,0 +1,31 @@
+=== RUN   TestBrowserOperatorLayout
+2026/09/22 20:54:00 INFO request id=XC6gWQE5aWFBxgoHIv1Z9Q method=GET duration_ms=11
+2026/09/22 20:54:00 INFO request id=RLo-pM23XIZNcGU13SNt7Q method=GET duration_ms=2
+2026/09/22 20:54:00 INFO request id=dhGs9aeY_fE2Ij1PEHW8_A method=GET duration_ms=0
+2026/09/22 20:54:00 INFO request id=fvu6RSUcMUdzGDWj5KhIAQ method=GET duration_ms=0
+2026/09/22 20:54:00 INFO request id=QK1YLVQGC_gF60eElY1fcw method=GET duration_ms=1
+2026/09/22 20:54:00 INFO request id=MKX5r2RHduxjeMZmQDwMZw method=GET duration_ms=1
+2026/09/22 20:54:01 INFO request id=TDaa7wfyFW6ehzexVvbAgg method=GET duration_ms=0
+2026/09/22 20:54:01 INFO request id=yaUB8fjD3yMWV9wKl_vPFQ method=GET duration_ms=1
+2026/09/22 20:54:01 INFO request id=geEXrSl7lySFiZi3VnkBuA method=GET duration_ms=1
+2026/09/22 20:54:01 INFO request id=JyWROApTJ6t7ZuZTKTjw9A method=GET duration_ms=1
+2026/09/22 20:54:01 INFO request id=dUWKZ6zKuON2cMD5tvgMmA method=GET duration_ms=2
+2026/09/22 20:54:01 INFO request id=ZpdmL3MWwayq2QRYGafLdA method=GET duration_ms=0
+2026/09/22 20:54:01 INFO request id=JZfUrxUB4RbZ4VD1WGc4cA method=GET duration_ms=0
+2026/09/22 20:54:01 INFO request id=R58uE_jbbWP1-_0fJ7APBw method=GET duration_ms=0
+2026/09/22 20:54:01 INFO request id=JGwYEfdYhCOAQzQKOT3Qpw method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=qjX2E7kUE04Dk6DOgSZITA method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=pz_jK966GlgUdUm_GXfvXA method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=x3ThjTuknYIVLCuHFEuWJQ method=GET duration_ms=1
+2026/09/22 20:54:02 INFO request id=s0MIykIOiLjnSY4dYRCEcw method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=4jQIRCPXLTkN7PAFBzMy1Q method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=ue3NgUO_Ge59sU_pnPGsHw method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=yzlRxKcph_q4fvVNWcyDbw method=GET duration_ms=1
+2026/09/22 20:54:02 INFO request id=wPWs9WVbf1-2MSsXuNyAZA method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=IiOvpbGLpIQUp1t1q_Fp1g method=GET duration_ms=0
+2026/09/22 20:54:02 INFO request id=JS4eK3Tth5pyMfAtfwU1Pg method=GET duration_ms=0
+    browser_forms_test.go:63: PASS rendered layout only: actual templates/CSS; no native form or browser network qualification
+
+--- PASS: TestBrowserOperatorLayout (4.05s)
+PASS
+ok  	github.com/yellowman/authd/internal/web	5.075s

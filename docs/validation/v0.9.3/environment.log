@@ -1,0 +1,4 @@
+go version go1.23.2 linux/amd64
+Linux x86_64
+Python Playwright 1.57.0
+Chromium 144.0.7559.96 built on Debian GNU/Linux 13 (trixie)

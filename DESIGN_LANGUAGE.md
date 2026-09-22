@@ -262,3 +262,27 @@ No bouncing, rotating decoration, or perpetual pulsing on ordinary admin screens
 ## Implementation rule
 
 The CSS in `internal/web/static/app.css` is the executable source of the starter UI. This document is the behavioral/design contract. New components should first be expressible using existing semantic tokens and row/section grammar; add a new visual primitive only when the old grammar cannot represent the required interaction cleanly.
+
+
+## Operator understanding is part of the interface
+
+Administration starts with a short, linked first-application procedure, not a
+release-history paragraph or an empty database table. Every section explains its
+object, what editing it changes, and the next action. Each ambiguous field has a
+visible description; a placeholder or a tooltip alone is not a description.
+
+Client scopes must distinguish allowed from requested from granted. The BDC
+role-mapping path must not imply that the operator needs a new permission catalog.
+A user's subject, client connection details, and next application-side steps are
+visible where needed. A one-time secret reveal states who receives the secret and
+where it belongs; secrets do not appear in saved connection summaries.
+
+Keep app/session/admin boundaries explicit. Do not promise that a provider sign-out
+destroys an application's independent cookie, that a role makes every app admit a
+user, or that typing a permission adds application behavior. Help is not a fake
+readiness report. It does not claim live callback/proxy checks happened.
+
+Guidance uses existing section bands, rows, field help, and ordinary links. No
+forced tour, new frontend dependency, auto-provisioning shortcut, or policy wizard
+is needed. Verify both 1440px and 390px layouts and native browser form submission,
+not only HTTP requests with test-injected Origin headers.

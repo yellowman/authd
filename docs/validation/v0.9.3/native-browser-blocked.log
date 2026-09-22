@@ -1,0 +1,97 @@
+=== RUN   TestBrowserNativeWebForms
+2026/09/22 20:51:20 http: TLS handshake error from 127.0.0.1:58820: EOF
+    browser_forms_test.go:63: Traceback (most recent call last):
+          File "/mnt/data/authd-v093-work/authd/internal/web/../../scripts/browser_forms.py", line 161, in <module>
+            run(json.loads(Path(sys.argv[1]).read_text()))
+            ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "/mnt/data/authd-v093-work/authd/internal/web/../../scripts/browser_forms.py", line 82, in run
+            page.goto(origin + "/setup?test_private=must-not-leak")
+            ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/sync_api/_generated.py", line 9050, in goto
+            self._sync(
+            ~~~~~~~~~~^
+                self._impl_obj.goto(
+                ^^^^^^^^^^^^^^^^^^^^
+                    url=url, timeout=timeout, waitUntil=wait_until, referer=referer
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                )
+                ^
+            )
+            ^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_sync_base.py", line 115, in _sync
+            return task.result()
+                   ~~~~~~~~~~~^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 552, in goto
+            return await self._main_frame.goto(**locals_to_params(locals()))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_frame.py", line 153, in goto
+            await self._channel.send(
+                "goto", self._navigation_timeout, locals_to_params(locals())
+            )
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 69, in send
+            return await self._connection.wrap_api_call(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ...<3 lines>...
+            )
+            ^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 559, in wrap_api_call
+            raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+        playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at https://127.0.0.1:42345/setup?test_private=must-not-leak
+        Call log:
+          - navigating to "https://127.0.0.1:42345/setup?test_private=must-not-leak", waiting until "load"
+
+
+    browser_forms_test.go:65: browser web witness: exit status 1
+--- FAIL: TestBrowserNativeWebForms (1.54s)
+FAIL
+FAIL	github.com/yellowman/authd/internal/web	1.560s
+=== RUN   TestBrowserNativeConsentAndLogout
+2026/09/22 20:51:21 http: TLS handshake error from 127.0.0.1:60172: EOF
+    browser_forms_test.go:52: Traceback (most recent call last):
+          File "/mnt/data/authd-v093-work/authd/internal/oidc/../../scripts/browser_forms.py", line 161, in <module>
+            run(json.loads(Path(sys.argv[1]).read_text()))
+            ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "/mnt/data/authd-v093-work/authd/internal/oidc/../../scripts/browser_forms.py", line 136, in run
+            page.goto(manifest["authorize"])
+            ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/sync_api/_generated.py", line 9050, in goto
+            self._sync(
+            ~~~~~~~~~~^
+                self._impl_obj.goto(
+                ^^^^^^^^^^^^^^^^^^^^
+                    url=url, timeout=timeout, waitUntil=wait_until, referer=referer
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                )
+                ^
+            )
+            ^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_sync_base.py", line 115, in _sync
+            return task.result()
+                   ~~~~~~~~~~~^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 552, in goto
+            return await self._main_frame.goto(**locals_to_params(locals()))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_frame.py", line 153, in goto
+            await self._channel.send(
+                "goto", self._navigation_timeout, locals_to_params(locals())
+            )
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 69, in send
+            return await self._connection.wrap_api_call(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ...<3 lines>...
+            )
+            ^
+          File "/opt/pyvenv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 559, in wrap_api_call
+            raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+        playwright._impl._errors.Error: Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR at https://127.0.0.1:35801/authorize?client_id=bdcmaps&code_challenge=1T7aemN8mcx_tWbZbp-hCb8VxHhBCj9etNTE4mzQgfY&code_challenge_method=S256&nonce=browser-nonce&prompt=consent&redirect_uri=https%3A%2F%2F127.0.0.1%3A35801%2Fauth%2Fcallback&response_type=code&scope=openid+profile+email+groups+offline_access&state=browser-test
+        Call log:
+          - navigating to "https://127.0.0.1:35801/authorize?client_id=bdcmaps&code_challenge=1T7aemN8mcx_tWbZbp-hCb8VxHhBCj9etNTE4mzQgfY&code_challenge_method=S256&nonce=browser-nonce&prompt=consent&redirect_uri=https%3A%2F%2F127.0.0.1%3A35801%2Fauth%2Fcallback&response_type=code&scope=openid+profile+email+groups+offline_access&state=browser-test", waiting until "load"
+
+
+    browser_forms_test.go:54: native OIDC browser witness: exit status 1
+--- FAIL: TestBrowserNativeConsentAndLogout (2.07s)
+FAIL
+FAIL	github.com/yellowman/authd/internal/oidc	2.094s
+FAIL
+
+native browser gate exit=1; inspect actual errors above; not a skipped success

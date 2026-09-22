@@ -1,0 +1,17 @@
+2026/09/22 20:36:28 INFO request id=8GaO5sTpwgvdbMmQDCBNew method=GET duration_ms=0
+2026/09/22 20:36:28 INFO request id=IBZbA2Ai2dFdQu8CoP3fqg method=GET duration_ms=0
+2026/09/22 20:36:28 INFO request id=qkXQ9gKwNifu-QV9F6sZ1A method=GET duration_ms=0
+2026/09/22 20:36:28 INFO request id=LKA7G10uYQiMf3fJMITUpQ method=GET duration_ms=0
+--- FAIL: TestFormResponsesPreserveOriginForNativePosts (0.00s)
+    operator_help_test.go:139: /setup: status=200 policy="no-referrer"
+    operator_help_test.go:139: /login: status=200 policy="no-referrer"
+    operator_help_test.go:139: /account: status=200 policy="no-referrer"
+    operator_help_test.go:139: /admin/: status=200 policy="no-referrer"
+FAIL
+FAIL	github.com/yellowman/authd/internal/web	0.005s
+--- FAIL: TestInteractionFormsPreserveBrowserOrigin (0.48s)
+    operator_help_test.go:15: /authorize/consent: bad referrer policy "no-referrer"
+    operator_help_test.go:15: /logout: bad referrer policy "no-referrer"
+FAIL
+FAIL	github.com/yellowman/authd/internal/oidc	0.484s
+FAIL

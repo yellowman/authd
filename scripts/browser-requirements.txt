@@ -1,0 +1,2 @@
+# Test-only: never an authd runtime dependency.
+playwright==1.57.0

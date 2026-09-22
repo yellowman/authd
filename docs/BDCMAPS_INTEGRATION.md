@@ -4,6 +4,47 @@ This document records the first real relying-party contract for `authd`.
 It is based on the current `yellowman/bdcmaps` `main` branch inspected on
 2026-09-21, rather than on a hypothetical OIDC client.
 
+## First login, in operator order
+
+Read [Using authd](../OPERATOR_GUIDE.md#4-connect-bdc-maps-first) for the complete
+walkthrough. The authd browser has the same starting point at **Administration →
+Start here**. Do not configure every section just to connect BDC.
+
+1. **authd Roles:** create the four `bdcmaps-…` roles below; no permission
+   checkboxes are required for BDC group mapping.
+2. **authd Users:** enter the person's email and assign the intended role. A
+   forced password change must be completed at Account before retrying BDC.
+3. **authd Clients:** create `bdcmaps`, confidential, 300-second access tokens,
+   exact callback, and allowed `openid profile email groups`. Initially keep
+   refresh/offline access off. Enroll MFA before enabling a required-MFA policy.
+4. **BDC backend:** set `OIDC_CLIENT_SECRET` to the one-time generated secret.
+   Use authd's saved **Copy into BDC Maps** details for issuer/client/callback.
+5. **BDC OIDC settings:** request the same four scopes, set `group_claim=groups`,
+   and configure the four exact name mappings. Those settings are not pushed by
+   authd.
+6. **Test from BDC:** sign in as an administrator and as a restricted person;
+   inspect the role inside BDC. Provider login alone does not prove its callback.
+
+For the named deployment, the exact callback would be
+`https://maps.ykwc.com/auth/callback`; it is not a verified live deployment claim.
+Keep authd's issuer as its public HTTPS origin, never its Unix-socket address.
+
+### New BDC installation versus an existing one
+
+The reviewed BDC tree's `deploy/production/bootstrap-oidc.sql` configures the first
+OIDC settings and explicitly links the initial administrator by issuer + subject.
+It is a **BDC** installer operation, not an authd command. Edit the authd user to
+find the stable subject shown in **Identity used by applications**. For an existing
+BDC installation, use its own OIDC administration/settings and an explicit account
+linking/provisioning procedure; do not run a fresh-install seed against existing
+users or join identities merely by email.
+
+The reviewed BDC schema starts with `auto_provision=false` and a `viewer` default
+role. The callback may admit a mapped administrator and otherwise applies its
+configured provisioning policy. Missing group mapping can fall back to the default
+role rather than deny login. Verify both admission and resulting role: authd has
+no per-client allowed-users list, and `groups` is not a complete admission policy.
+
 ## What bdcmaps already does
 
 `bdcmaps` already implements the useful parts of a modern OIDC relying party:

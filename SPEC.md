@@ -1,6 +1,6 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.9.2
+## Specification v0.9.3
 
 Status: binding product design; implementation corrected by the v0.9.0 protocol, transaction, and performance audit. See `docs/OIDC_AUDIT.md` and `VALIDATION.md`. This is not an OpenID certification or production signoff.
 
@@ -1711,7 +1711,7 @@ Recommended security headers:
 ```text
 Content-Security-Policy
 X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
+Referrer-Policy: origin
 Permissions-Policy
 ```
 
@@ -2334,8 +2334,10 @@ Where `authd` intentionally supports only a subset of optional protocol behavior
 The source implements local identity/bootstrap/MFA/administration and the limited
 code-flow OIDC profile described above. No OpenID certification, production
 signoff, external RP acceptance, or measured PostgreSQL throughput is claimed.
-The prior tester's OpenBSD/real-PostgreSQL pass belongs to the earlier revision,
-not this refactored transaction implementation.
+At the original v0.9.0 audit handoff, the earlier tester report did not qualify
+those new transactions. A subsequent user-supplied v0.9.0 OpenBSD/PostgreSQL/live
+provider pass is recorded in VALIDATION.md. Later UI/transport changes retain
+their own evidence boundaries; none implies an actual BDC callback pass.
 
 Security-changing identity/client/key operations use an exclusive transaction
 advisory gate. Unrelated grant transactions share that gate and lock their own
@@ -2374,3 +2376,34 @@ tests remain required deployment gates. See `VALIDATION.md` for exactly which
 checks ran, and `docs/OIDC_AUDIT.md` for before/after findings and measurements.
 
 ---
+
+
+# 46. Operator guidance and native form contract (v0.9.3)
+
+The admin landing view MUST offer a first-application procedure and navigation to
+users, roles, clients, and troubleshooting. Section/field help MUST distinguish
+people, roles/groups, application permissions, registered clients, public issuer,
+callback URI, client secret, signing keys, master key, and PostgreSQL identities.
+An allowed scope is not implicitly requested or granted. The current BDC role-name
+mapping MUST be documented separately from scope-based permission enforcement.
+
+Saved client connection details MUST derive from persisted client state and the
+configured public issuer, not request Host or client-supplied help text. They MUST
+NOT reveal a stored secret. A one-time creation response MAY show the newly issued
+secret together with connection instructions. User editing SHOULD show issuer +
+stable subject for explicit RP account linking, not suggest email-only linking.
+
+`OPERATOR_GUIDE.md` is installed alongside `DEPLOYMENT.md`. Operational help MUST
+state implemented limitations (no per-client allowed-user list or role-name filter,
+no back-channel logout, no email delivery) rather than invent missing features.
+Help routes remain protected by the existing admin authorization boundary.
+
+HTML form responses, including OIDC consent/logout interaction pages, use
+`Referrer-Policy: origin`. Native non-CORS form navigation with `no-referrer` may
+serialize an opaque `Origin: null`, incompatible with the UI's same-origin check.
+The origin-only policy omits path/query data from Referer. The implementation MUST
+NOT weaken CSRF or allow opaque/foreign origins to work around document policy.
+The separate browser gate exercises native submission without supplying synthetic
+Origin headers. It is distinct from HTTP unit tests and real database/RP gates.
+
+Reference: Fetch Standard, “append a request Origin header”, and W3C Referrer Policy.

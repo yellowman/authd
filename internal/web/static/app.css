@@ -236,3 +236,40 @@ summary { cursor:pointer; min-height:32px; padding:5px 0; }
 .skip-link { position:absolute; left:-1000px; top:0; background:var(--surface); padding:12px; z-index:5; }
 .skip-link:focus { left:0; }
 @media(max-width:600px) { .form-grid { grid-template-columns:1fr; } .form-body { padding:14px; } .simple-page { padding-top:26px; } .section-heading { gap:10px; flex-wrap:wrap; } th,td { padding:9px 10px; } }
+
+/* Operator guidance is an ordinary section, not a dashboard or an overlay. */
+h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.45; }
+.field-help { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 4px 0 10px; max-width: 78ch; }
+label > small { display: block; font-weight: 400; font-size: 12px; line-height: 1.5; }
+.view-help { border-left: 2px solid var(--line-strong); padding: 2px 18px; margin: 6px 0 24px; max-width: 92ch; }
+.view-help p { margin: 8px 0; }
+.guide-intro { margin: 6px 0 24px; max-width: 80ch; }
+.guide-links { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.reference-rows { margin: 0; }
+.reference-rows > div { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(0, 3fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.reference-rows > div:last-child { border-bottom: 0; }
+.reference-rows dt { font-weight: 600; }
+.reference-rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.task-steps { margin: 0; padding: 0 20px 0 48px; }
+.task-steps li { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.task-steps li:last-child { border-bottom: 0; }
+.task-steps p { max-width: 84ch; margin: 6px 0; }
+.task-steps li::marker { color: var(--muted); font-size: 13px; }
+.guide-troubleshooting { padding: 0 18px; }
+.section-tabs [aria-current="page"] { color: var(--text); text-decoration: underline; text-underline-offset: 5px; }
+#model, #bdc, #troubleshooting, #connection-details { scroll-margin-top: 16px; }
+@media (max-width: 640px) {
+ .reference-rows > div { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+ .view-help { padding-left: 12px; }
+ .task-steps { padding-left: 36px; }
+}
+
+.form-body select, .form-body textarea {
+ font: inherit; width: 100%; padding: 8px 10px;
+ border: 1px solid var(--line-strong); border-radius: var(--radius);
+ color: var(--text); background: var(--surface);
+}
+.scope-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+.scope-choices .check { align-items: flex-start; }
+.check small { font-size: 12px; font-weight: 400; line-height: 1.55; }
+@media (max-width: 640px) { .scope-choices { grid-template-columns: minmax(0, 1fr); } }

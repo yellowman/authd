@@ -1,0 +1,35 @@
+$ make fmt-check env-check linux-deploy-check
+
+$ sh -n scripts/check-offline.sh
+
+$ sh -n scripts/generate-master-key.sh
+
+PASS Python browser helper parses; no runtime/dependency install performed
+PASS 29 documentation shell blocks parse; none executed against PostgreSQL
+PASS 49 local documentation links resolve (fragment anchors covered separately by guide tests)
+PASS 42 dependency/database/config/listener/deployment files byte-identical to c3a0cab; migrations 001-005 untouched
+$ make install INSTALL_OS=Linux DESTDIR=/tmp/authd-doc-stage-faz7cgwg BINARY=/bin/true
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing systemd service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+PASS Linux staged installer includes byte-identical operator guide; no active env/key/pgpass; /bin/true is packaging fixture only
+$ make install INSTALL_OS=OpenBSD DESTDIR=/tmp/authd-doc-stage-85nujs4r BINARY=/bin/true
+==> staged install: not creating _authd
+==> installing authd binary and documentation
+==> installing authd configuration
+staged install: active env, pgpass, and master key are not created
+==> installing OpenBSD rc.d service
+
+authd program/service assets installed.
+First install: complete /etc/authd/authd.env and /etc/authd/pgpass. Upgrade: run reviewed migrations before restart.
+See /usr/local/share/doc/authd/DEPLOYMENT.md.
+PASS OpenBSD staged installer includes byte-identical operator guide; no active env/key/pgpass; /bin/true is packaging fixture only
+$ git diff --check
+
+PASS static checks; no native service startup, nginx reload, PostgreSQL execution, or production build claimed

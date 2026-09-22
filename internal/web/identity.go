@@ -252,20 +252,26 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	data, err := s.auth.Store.AdminData(r.Context(), identity.Hash(raw))
-	if err != nil {
-		s.failure(w, r, err)
-		return
-	}
 	d := s.data("Administration")
 	d.Session = sess
-	d.Admin = data
 	d.CSRF = s.auth.CSRF(raw, "session")
 	d.View = r.URL.Query().Get("view")
 	switch d.View {
-	case "users", "roles", "permissions", "clients", "sessions", "keys", "audit":
+	case "guide", "users", "roles", "permissions", "clients", "sessions", "keys", "audit":
 	default:
-		d.View = "users"
+		d.View = "guide"
+	}
+	// The static guide needs a live admin identity, not a full catalog scan.
+	var data identity.AdminData
+	selected := r.URL.Query().Get("user") != "" || r.URL.Query().Get("role") != "" || r.URL.Query().Get("permission") != "" || r.URL.Query().Get("client") != ""
+	if d.View != "guide" || selected {
+		var err error
+		data, err = s.auth.Store.AdminData(r.Context(), identity.Hash(raw))
+		if err != nil {
+			s.failure(w, r, err)
+			return
+		}
+		d.Admin = data
 	}
 	if d.View == "clients" || r.URL.Query().Get("client") != "" {
 		clients, e := s.oidc.AdminClients(r.Context(), raw)
@@ -511,6 +517,7 @@ func (s *Server) createClient(w http.ResponseWriter, r *http.Request) {
 	if secret != "" {
 		d := s.data("Save the client secret")
 		d.Secret = secret
+		d.SelectedClient = &client
 		d.Notice = "Client " + client.ClientID + " was created. This secret is shown only in this response."
 		s.render(w, 200, "client_secret.html", d)
 		return

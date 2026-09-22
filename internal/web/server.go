@@ -35,6 +35,14 @@ type Server struct {
 	templates   *template.Template
 	oidc        *oidc.HTTP
 }
+
+// Form failures remain forbidden, but the HTML response should tell the user
+// whether to reload the form or check the configured public/proxy address.
+var (
+	errFormOrigin = fmt.Errorf("%w: form origin mismatch", identity.ErrForbidden)
+	errFormCSRF   = fmt.Errorf("%w: form session mismatch", identity.ErrForbidden)
+)
+
 type clientIPContextKey struct{}
 type pageData struct {
 	Title, Issuer, Section, View, CSRF, Error, ErrorReference, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
@@ -58,7 +66,8 @@ func New(cfg config.Config, auth *identity.Service, health func(context.Context)
 		return nil, errors.New("identity service and health check are required")
 	}
 	tmpl, err := template.New("").Funcs(template.FuncMap{
-		"join": strings.Join, "selected": func(ids []string, id string) bool {
+		"scopeHelp": oidc.ScopeDescription,
+		"join":      strings.Join, "selected": func(ids []string, id string) bool {
 			for _, x := range ids {
 				if x == id {
 					return true
@@ -167,6 +176,12 @@ func (s *Server) failure(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, identity.ErrSession):
 		status = 401
 		message = "Your session has expired or was revoked. Sign in again."
+	case errors.Is(err, errFormOrigin):
+		status = 403
+		message = "This form did not come from the configured authd address. Open authd at its public address, reload the form, and try again. If this repeats, ask the server administrator to check the issuer, proxy, and Referrer-Policy settings."
+	case errors.Is(err, errFormCSRF):
+		status = 403
+		message = "This form expired or no longer matches your browser session. Reload the page before submitting again; another sign-in or sign-out may have changed the session."
 	case errors.Is(err, identity.ErrForbidden):
 		status = 403
 		message = "Permission denied. Sensitive administration and MFA changes also require a sign-in within the last 10 minutes."
@@ -259,10 +274,10 @@ func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) error {
 		return identity.Invalid("form actions do not accept query parameters")
 	}
 	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" {
-		return identity.ErrForbidden
+		return errFormOrigin
 	}
 	if origin := r.Header.Get("Origin"); origin != "" && origin != s.cfg.Issuer {
-		return identity.ErrForbidden
+		return errFormOrigin
 	}
 	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || kind != "application/x-www-form-urlencoded" {
@@ -286,7 +301,7 @@ func (s *Server) anonForm(w http.ResponseWriter, r *http.Request) error {
 	raw := s.cookie(r, "browser")
 	token := r.PostForm.Get("csrf_token")
 	if raw == "" || !cryptoutil.ValidToken(token) || !hmac.Equal([]byte(token), []byte(s.auth.CSRF(raw, "browser"))) {
-		return identity.ErrForbidden
+		return errFormCSRF
 	}
 	return nil
 }
@@ -316,7 +331,7 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request, admin, allowForced
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		err = s.parseForm(w, r)
 		if err == nil && !s.auth.ValidCSRF(session, raw, r.PostForm.Get("csrf_token")) {
-			err = identity.ErrForbidden
+			err = errFormCSRF
 		}
 		if err != nil {
 			s.failure(w, r, err)
@@ -416,7 +431,10 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		// A no-referrer policy makes browsers serialize the Origin header as
+		// "null" for native form navigations. Keep paths out of Referer while
+		// preserving the origin needed by parseForm's same-origin check.
+		w.Header().Set("Referrer-Policy", "origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 		w.Header().Set("Cache-Control", "no-store")
 		if !s.cfg.Development {

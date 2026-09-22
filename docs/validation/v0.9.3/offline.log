@@ -1,0 +1,14 @@
+ok  	github.com/yellowman/authd/internal/config	1.026s
+ok  	github.com/yellowman/authd/internal/cryptoutil	1.013s
+ok  	github.com/yellowman/authd/internal/identity	1.018s
+?   	github.com/yellowman/authd/internal/protocol	[no test files]
+?   	github.com/yellowman/authd/internal/requestid	[no test files]
+ok  	github.com/yellowman/authd/internal/listener	2.151s
+ok  	github.com/yellowman/authd/internal/db	1.016s
+ok  	github.com/yellowman/authd/internal/oidc	3.872s
+ok  	github.com/yellowman/authd/internal/totp	1.021s
+ok  	github.com/yellowman/authd/internal/web	1.295s
+ok  	command-line-arguments	1.010s
+ok  	command-line-arguments	0.003s [no tests to run]
+
+PARTIAL CHECK ONLY: pgx, Argon2, full executable, PostgreSQL transactions and external OIDC-client interoperability were not exercised. Run make deps and make verify in the supported environment.

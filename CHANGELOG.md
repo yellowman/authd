@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.3 — Native forms and operator guidance (2026-09-22)
+
+Incorporated the user-supplied Referrer-Policy fix in both web and OIDC
+interaction responses: `origin`, not `no-referrer`. Native form submissions must
+retain their same-origin evidence. Origin/CSRF refusals are unchanged but now
+explain different recovery steps instead of presenting one generic denial.
+
+Added an admin-only Start here landing page, a concrete two-sided BDC Maps
+walkthrough, contextual section/field help, saved client connection details, and
+stable issuer/subject display for explicit account linking. Clarified user versus
+client versus PostgreSQL credentials, role/group mapping versus permission scopes,
+MFA/refresh decisions, application-local sessions, and admission/privacy limits.
+The static guide avoids the full admin-catalog query while still checking the
+live administrator session. No catalog, membership or entitlement is created
+automatically.
+
+Added OPERATOR_GUIDE.md, installed with the normal native documentation; README
+now starts with the operator workflow rather than release history. Added normal
+Go regressions plus opt-in native-form and separately labeled layout browser
+tests. Component race/vet and 24 desktop/mobile layout renderings passed; native
+browser navigation was blocked by managed browser policy in this environment.
+See VALIDATION.md for the exact evidence boundary.
+
+No PostgreSQL migration, dependency-lock, credential, listener, environment or
+service-definition change. Build/install/restart and reload old form pages; do
+not rebootstrap, rotate keys, or change the proxy transport for this update.
+
 ## v0.9.2 — Unix-socket HTTP and service lifecycle (2026-09-22)
 
 Added real TCP/Unix listener selection, owner-only/group-restricted socket modes,

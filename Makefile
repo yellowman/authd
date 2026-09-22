@@ -31,7 +31,7 @@ INSTALL_OS?=
 .NOTPARALLEL:
 .PHONY: deps fmt fmt-check env-check test race vet build verify verify-openbsd \
 	verify-linux integration integration-openbsd openbsd-deploy-check \
-	linux-deploy-check offline-check run migrate dev-db dev-db-down \
+	linux-deploy-check offline-check browser-check run migrate dev-db dev-db-down \
 	install install-openbsd install-linux install-user install-files \
 	install-config install-service enable start restart status stop help
 
@@ -96,6 +96,12 @@ linux-deploy-check:
 	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
 	sed -e 's#^ExecStart=.*#ExecStart=/bin/true#' -e 's#^EnvironmentFile=.*#EnvironmentFile=-/dev/null#' deploy/systemd/authd.service > "$$tmp"; \
 	systemd-analyze verify "$$tmp"
+
+# Developer-only browser gate. Missing Playwright/browser is a failure here,
+# not a skipped pass. Runtime Go dependencies are unchanged.
+browser-check:
+	@python3 -c 'import playwright.sync_api' || { echo "Python Playwright required; see docs/BROWSER_TESTS.md" >&2; exit 1; }
+	${GO} test -mod=readonly -race -count=1 -tags=browser -run '^TestBrowser' ./internal/web ./internal/oidc
 
 offline-check:
 	./scripts/check-offline.sh
@@ -164,7 +170,7 @@ install-files:
 	@echo "==> installing authd binary and documentation"
 	@install -d -m 0755 "${DESTDIR}${BINDIR}" "${DESTDIR}${SHAREDIR}/postgresql" "${DESTDIR}${DOCDIR}"
 	@install -m 0755 "${BINARY}" "${DESTDIR}${BINDIR}/authd"
-	@install -m 0644 README.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md ARCHITECTURE.md VALIDATION.md TODO.md CHANGELOG.md "${DESTDIR}${DOCDIR}/"
+	@install -m 0644 README.md OPERATOR_GUIDE.md DEPLOYMENT.md SECURITY.md SPEC.md DESIGN_LANGUAGE.md ARCHITECTURE.md VALIDATION.md TODO.md CHANGELOG.md "${DESTDIR}${DOCDIR}/"
 	@install -d -m 0755 "${DESTDIR}${DOCDIR}/docs" "${DESTDIR}${SHAREDIR}/nginx"
 	@cp -R docs/. "${DESTDIR}${DOCDIR}/docs/"
 	@find "${DESTDIR}${DOCDIR}/docs" -type d -exec chmod 0755 {} \;
@@ -266,6 +272,7 @@ help:
 		'make verify                   Run full test/race/vet/PostgreSQL gate' \
 		'make verify-openbsd           Native OpenBSD gate (no race detector)' \
 		'make verify-linux             Native Linux/systemd gate' \
+		'make browser-check            Native Chromium forms; test-only Playwright required' \
 		'make install-openbsd          Install/update OpenBSD assets; preserve runtime state' \
 		'make install-linux            Install/update Linux assets; preserve runtime state' \
 		'make enable|start|restart     Manage installed service for current OS'

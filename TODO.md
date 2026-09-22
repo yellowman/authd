@@ -1,3 +1,13 @@
+# v0.9.3 operator/form follow-through
+
+Implemented: native-form response policy, admin-only Start here, field help,
+operator guide, connection summaries and origin/CSRF-specific recovery messages.
+The normal component gates and 24-page layout witness pass. Native browser
+submission must still run in an approved environment without the authoring
+container's navigation block; use `make browser-check` and
+[the test guide](docs/BROWSER_TESTS.md). This is additional to the existing real
+PostgreSQL, actual BDC callback and native deployment qualification below.
+
 # Implementation sequence — v0.9.1
 
 Checked implementation items mean source is present, not production qualification.

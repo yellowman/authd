@@ -23,6 +23,13 @@ the binary, examples, documentation, and service definition while preserving the
 active env, pgpass, master key, and PostgreSQL data. Schema migration remains an
 explicit owner-credential step rather than an install-time side effect.
 
+## After installation: operating the application
+
+Installation gets the service running; it does not connect BDC or assign users.
+Open **Administration → Start here**, or read [OPERATOR_GUIDE.md](OPERATOR_GUIDE.md)
+for roles, client registration, which values belong in BDC, MFA, and daily changes.
+You do not need to repeat PostgreSQL bootstrap when adding a person/application.
+
 ## 1. Trust boundaries
 
 There are three PostgreSQL identities, plus a separate Unix service account.
@@ -677,3 +684,24 @@ also include the new OpenBSD launcher or Linux runtime-directory settings.
 [1]: https://www.postgresql.org/docs/current/app-psql.html
 [2]: https://www.postgresql.org/docs/current/auth-peer.html
 [3]: https://www.postgresql.org/docs/current/sql-alterrole.html
+
+
+## v0.9.2 → v0.9.3 browser-form and operator-help update
+
+No schema migration, new key, client-secret rotation, dependency change, or socket
+reconfiguration is required. Build and validate the new binary, install with the
+normal native target, and restart the daemon. Active env/key/pgpass files remain
+unchanged. Reload open browser pages so their document policy comes from the new
+response; old pages may retain the old `no-referrer` policy until navigation.
+
+Authd's HTML form responses now use `Referrer-Policy: origin`. The former
+`no-referrer` policy can produce `Origin: null` on native browser form posts and
+conflicts with the provider UI's origin validation. Do not override the new header
+with `no-referrer` at nginx/relayd. Do not fix rejection by allowing null origins or
+removing CSRF. A missing/invalid CSRF token or foreign/opaque Origin remains an
+error. The actual policy, not just the input cookies, must be tested through the
+public HTTPS reverse proxy. See [browser tests](docs/BROWSER_TESTS.md).
+
+`make install-*` now installs `OPERATOR_GUIDE.md` alongside this guide. The default
+admin view is **Start here**; all prior `?view=users`/roles/clients links and form
+endpoints remain valid.
