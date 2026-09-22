@@ -33,7 +33,6 @@
 <div><dt>Registered sign-in callbacks</dt><dd>{{range .SelectedClient.RedirectURIs}}<code class="block">{{.}}</code>{{end}}</dd></div>
 </dl>
 <p class="field-help">Copy the issuer and client ID exactly. Configure the app to request only the scopes it needs from these allow-lists. The app uses Authorization Code + PKCE (S256). Confidential clients use <code>client_secret_basic</code> or <code>client_secret_post</code>; public clients have no secret.</p>
-{{if eq .SelectedClient.ClientID "bdcmaps"}}<p class="field-help"><a href="/admin/docs?doc=docs%2FBDCMAPS_INTEGRATION.md">BDC Maps integration profile</a>: application-side settings, <code>OIDC_CLIENT_SECRET</code> and group mappings.</p>{{end}}
 <p class="field-help">No secret is included in these saved details. It is displayed only when created or rotated. <a href="/admin/?view=guide#doc-5-configure-the-application-side">Application-side setup</a>.</p>
 </div></section>
 {{end}}

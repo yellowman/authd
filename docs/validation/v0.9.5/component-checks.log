@@ -1,0 +1,17 @@
+PARTIAL DEPENDENCY CHECK: x/text from explicitly supplied source /mnt/data/authd-v095-evidence/local-xtext; not production v0.42.0 qualification.
+ok  	github.com/yellowman/authd	1.064s
+ok  	github.com/yellowman/authd/internal/docsite	1.027s
+ok  	github.com/yellowman/authd/internal/config	1.025s
+ok  	github.com/yellowman/authd/internal/cryptoutil	1.009s
+ok  	github.com/yellowman/authd/internal/identity	1.015s
+?   	github.com/yellowman/authd/internal/protocol	[no test files]
+?   	github.com/yellowman/authd/internal/requestid	[no test files]
+ok  	github.com/yellowman/authd/internal/listener	2.140s
+ok  	github.com/yellowman/authd/internal/db	1.016s
+ok  	github.com/yellowman/authd/internal/oidc	3.896s
+ok  	github.com/yellowman/authd/internal/totp	1.010s
+ok  	github.com/yellowman/authd/internal/web	1.478s
+ok  	command-line-arguments	1.011s
+ok  	command-line-arguments	0.003s [no tests to run]
+
+PARTIAL CHECK ONLY: pgx, Argon2, full executable, PostgreSQL transactions and external OIDC-client interoperability were not exercised. Run make deps and make verify in the supported environment.

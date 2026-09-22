@@ -1,0 +1,12 @@
+Build-time discovery witness: added new Markdown under two previously unknown nested docs/deploy directories.
+No embed patterns or catalog code edited.
+=== RUN   TestEveryProductMarkdownFileIsEmbeddedAndRenderable
+--- PASS: TestEveryProductMarkdownFileIsEmbeddedAndRenderable (0.01s)
+PASS
+ok  	github.com/yellowman/authd	0.016s
+
+Removed both probes; rebuilt catalog reflects original directories.
+=== RUN   TestEveryProductMarkdownFileIsEmbeddedAndRenderable
+--- PASS: TestEveryProductMarkdownFileIsEmbeddedAndRenderable (0.01s)
+PASS
+ok  	github.com/yellowman/authd	0.015s

@@ -24,7 +24,7 @@ type Heading struct {
 	ID, Text string
 	Level    int
 }
-type Entry struct{ Path, Title, Description, Category, URL string }
+type Entry struct{ Path, Name, Title, Directory, URL string }
 type Group struct {
 	Name    string
 	Entries []Entry
@@ -44,46 +44,6 @@ type Library struct {
 	search    map[string]string
 }
 
-var descriptions = map[string]string{
-	StartDocument:                  "Connect any OIDC application, choose an access model, and assign people the right roles.",
-	"OPERATOR_GUIDE.md":            "Everyday user, role, permission, client and session administration.",
-	"DEPLOYMENT.md":                "PostgreSQL setup, installation, runtime configuration and upgrades.",
-	"DESIGN_LANGUAGE.md":           "Layout, typography, icon and interaction rules for the interface.",
-	"SPEC.md":                      "The binding product, protocol and security requirements.",
-	"ARCHITECTURE.md":              "Components, data ownership and transaction boundaries.",
-	"SECURITY.md":                  "Security invariants, known limits and reporting guidance.",
-	"VALIDATION.md":                "What was actually exercised, including the verified first relying party.",
-	"CHANGELOG.md":                 "Release changes and upgrade consequences.",
-	"TODO.md":                      "Remaining implementation and qualification work.",
-	"README.md":                    "Product overview and entry points.",
-	"docs/RP_INTEGRATION.md":       "Identity linking, scopes, tenant boundaries, MFA, sessions and logout for app developers.",
-	"docs/BDCMAPS_INTEGRATION.md":  "The BDC Maps client settings and the first verified application profile.",
-	"docs/UNIX_SOCKET.md":          "Unix sockets, proxy group permissions and nginx chroot paths.",
-	"docs/BROWSER_TESTS.md":        "Native browser form tests and the distinction from layout checks.",
-	"docs/DOCUMENTATION_PORTAL.md": "How release Markdown is embedded, rendered and kept safe.",
-	"docs/FIELD_REFERENCE.md":      "What each form field means, what to enter and what changing it affects.",
-	"deploy/openbsd/README.md":     "OpenBSD service installation, environment loading and rc.d operation.",
-	"deploy/systemd/README.md":     "Linux installation, runtime directories and systemd operation.",
-	"deploy/postgresql/README.md":  "Database and role bootstrap, migrations and restricted runtime grants.",
-	"AGENTS.md":                    "Repository rules for contributors: architecture, dependencies and security.",
-	"THIRD_PARTY.md":               "The bundled Markdown parser, its license and the rendering boundary.",
-}
-
-func category(name string) string {
-	switch {
-	case name == StartDocument || name == "OPERATOR_GUIDE.md" || name == "docs/FIELD_REFERENCE.md":
-		return "Get started"
-	case name == "DEPLOYMENT.md" || strings.HasPrefix(name, "deploy/") || name == "docs/UNIX_SOCKET.md":
-		return "Install and operate"
-	case name == "docs/RP_INTEGRATION.md" || name == "docs/BDCMAPS_INTEGRATION.md" || name == "docs/PROTOCOL_ADAPTERS.md":
-		return "Connect applications"
-	case strings.HasPrefix(name, "docs/validation/") || name == "VALIDATION.md" || name == "docs/OIDC_AUDIT.md" || name == "docs/BROWSER_TESTS.md":
-		return "Validation and testing"
-	default:
-		return "Design and reference"
-	}
-}
-
 // URL names a catalog entry. It is not a filesystem URL.
 func URL(name string) string { return "/admin/docs?doc=" + url.QueryEscape(name) }
 
@@ -98,8 +58,12 @@ func New(src fs.FS) (*Library, error) {
 			return nil
 		}
 		ext := strings.ToLower(path.Ext(name))
-		if ext != ".md" && ext != ".log" && ext != ".txt" && ext != ".json" {
-			return nil
+		if ext != ".md" {
+			// Only the docs tree carries published evidence. Walking deploy
+			// for Markdown must not also expose future deployment JSON/text.
+			if !strings.HasPrefix(name, "docs/") || (ext != ".log" && ext != ".txt" && ext != ".json") {
+				return nil
+			}
 		}
 		if !fs.ValidPath(name) || strings.ContainsAny(name, "\\\x00") || d.Type()&fs.ModeSymlink != 0 {
 			return fmt.Errorf("invalid documentation entry")
@@ -133,29 +97,16 @@ func New(src fs.FS) (*Library, error) {
 		if err != nil {
 			return nil, fmt.Errorf("render %s: %w", name, err)
 		}
-		e := Entry{Path: name, Title: rendered.title, Description: descriptions[name], Category: category(name), URL: URL(name)}
+		e := Entry{Path: name, Name: path.Base(name), Title: rendered.title, Directory: path.Dir(name), URL: URL(name)}
 		if e.Title == "" {
 			e.Title = path.Base(name)
 		}
-		if e.Description == "" {
-			e.Description = name
-		}
 		l.entries = append(l.entries, e)
-		l.search[name] = strings.ToLower(e.Title + " " + e.Path + " " + e.Description + " " + source)
+		l.search[name] = strings.ToLower(e.Title + " " + e.Path + " " + source)
 		l.documents[name] = Document{Entry: e, Body: template.HTML(rendered.body), TOC: rendered.headings, Source: source}
 	}
-	sort.Slice(l.entries, func(i, j int) bool {
-		if l.entries[i].Path == l.entries[j].Path {
-			return false
-		}
-		if l.entries[i].Path == StartDocument {
-			return true
-		}
-		if l.entries[j].Path == StartDocument {
-			return false
-		}
-		return l.entries[i].Path < l.entries[j].Path
-	})
+	// Order the exact paths; Start here is a route, not an exception in the index.
+	sort.Slice(l.entries, func(i, j int) bool { return l.entries[i].Path < l.entries[j].Path })
 	return l, nil
 }
 
@@ -167,9 +118,14 @@ func (l *Library) Document(name string) (Document, bool) {
 }
 func (l *Library) Source(name string) (string, bool) { b, ok := l.files[name]; return b, ok }
 func (l *Library) Count() int                        { return len(l.entries) }
+
+// Groups lists only Markdown documents, grouped by their containing directory.
+// Titles come from the Markdown; paths, membership and ordering come from the
+// source tree. There is no application registry, filename metadata or pinned row.
+// A new release snapshot automatically reflects added, renamed and removed files.
 func (l *Library) Groups(query string) []Group {
 	terms := strings.Fields(strings.ToLower(query))
-	groups := []Group{{Name: "Get started"}, {Name: "Install and operate"}, {Name: "Connect applications"}, {Name: "Validation and testing"}, {Name: "Design and reference"}}
+	byDirectory := make(map[string][]Entry)
 	for _, e := range l.entries {
 		haystack := l.search[e.Path]
 		match := true
@@ -179,21 +135,18 @@ func (l *Library) Groups(query string) []Group {
 				break
 			}
 		}
-		if !match {
-			continue
-		}
-		for i := range groups {
-			if groups[i].Name == e.Category {
-				groups[i].Entries = append(groups[i].Entries, e)
-				break
-			}
+		if match {
+			byDirectory[e.Directory] = append(byDirectory[e.Directory], e)
 		}
 	}
-	var out []Group
-	for _, g := range groups {
-		if len(g.Entries) > 0 {
-			out = append(out, g)
-		}
+	directories := make([]string, 0, len(byDirectory))
+	for dir := range byDirectory {
+		directories = append(directories, dir)
+	}
+	sort.Strings(directories)
+	out := make([]Group, 0, len(directories))
+	for _, dir := range directories {
+		out = append(out, Group{Name: dir, Entries: byDirectory[dir]})
 	}
 	return out
 }

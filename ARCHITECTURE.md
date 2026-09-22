@@ -181,8 +181,9 @@ provisioning and supplementary groups, not the Go process.
 ## Release documentation
 
 `manual.go` embeds the original root/docs/deployment Markdown. The isolated
-`internal/docsite` package parses and indexes the finite catalog once; its
-allow-list renderer does not execute raw HTML or load remote resources.
+`internal/docsite` package walks the embedded source directories and lists their
+Markdown files, with titles from source headings rather than a filename registry.
+It parses and indexes that finite tree once; its allow-list renderer does not execute raw HTML or load remote resources.
 `internal/web` authenticates every catalog/page/source request through the
 existing live administrator check. No database schema, documentation service,
 frontend renderer or runtime filesystem traversal is added. Markdown is not a

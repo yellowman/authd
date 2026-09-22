@@ -1,64 +1,72 @@
 # Documentation portal
 
-Administration → Start here begins with **Adding an app to authd**, a generic
-workflow rendered from `docs/ADDING_AN_APP.md`. **Documentation** opens the
-searchable release-document catalog. Application-specific instructions are
-separate profiles, not the landing-page workflow.
+**Start here** renders the generic [Adding an app to authd](ADDING_AN_APP.md)
+workflow. **Documentation** lists the Markdown files shipped with this release,
+not a registry of known applications or a hand-maintained menu.
 
-## Reading documentation
+## Directory listing
 
-Select a document to read its rendered Markdown, use its **On this page** heading
-links, or select **Markdown source** for the original file. Search matches document
-names, descriptions and source text. Relative Markdown links stay inside the
-portal and retain heading fragments. Linked, embedded test logs are available as
-plain-text evidence. Everything works without JavaScript or a network connection
-to a documentation host.
+The index is discovered from the embedded documentation tree. Each group names an
+actual directory (`./`, `docs/`, `deploy/openbsd/`, and any other directory that
+contains Markdown). Each row shows the filename, the first Markdown heading when
+present, and the full relative path. A file without a heading uses its filename.
+Directories and filenames are sorted alphabetically; there are no pinned files,
+per-application links, named categories or filename-to-description mappings.
 
-All product Markdown at the repository root, under `docs/`, and the three native
-PostgreSQL/OpenBSD/systemd README files is compiled into the binary from the actual
-source files. Tests require those files to appear in the catalog. This includes
-the spec, design language, operator/deployment guides, release notes, validation,
-application profiles and developer rules. Vendored parser implementation files,
-`.git`, environment files, credentials and arbitrary installed files are not
-served. The source checkout is not needed on the installed server.
+Product Markdown comes from root `*.md` files and recursive `docs/` and `deploy/`
+directories. New subdirectories are discovered too; no Go filename list needs
+editing. Linked validation logs under `docs/` remain readable as plain text, but only Markdown
+files become index rows. Empty directories and directories with only logs do not
+get invented document entries.
 
-## Editing documentation
+The built-in interface and client connection help are application-neutral.
+Application names and client settings displayed by forms come from their saved
+records, not client-ID-specific branches. A named application report, when present
+in the documentation tree, is an ordinary source document, not special UI. Historical
+validation evidence is not rewritten or filtered according to an application's name.
 
-Edit the original `.md` file, then build/install/restart authd. The binary is a
-release snapshot, not a live wiki. No duplicated HTML help article or generated
-copy has to be edited. New root/docs Markdown files are automatically embedded
-and listed; a short description/category can be added in
-`internal/docsite/library.go`. Native deployment README paths are explicit
-in `manual.go`. Adding another documentation root requires a deliberate embed
-rule and a catalog coverage test.
+## Reading and editing
 
-The original Markdown files are also shipped by the native installer. There is
-no new database table, migration, document upload endpoint, remote fetcher or
-runtime document-directory setting.
+Select a filename to read its Markdown, follow **On this page** heading links, or
+select **Markdown source** for the original file. Search matches filenames, paths,
+headings and source text. Relative document links remain inside the portal with
+their heading fragments. Reading and searching need no JavaScript or remote docs
+service.
+
+Edit, add, rename or remove the original Markdown file, then rebuild, install and
+restart authd. The next binary's index reflects that directory tree automatically.
+There is no separate HTML guide, title catalog or metadata registration to update.
+The existing Start here entry deliberately uses `docs/ADDING_AN_APP.md`; keep that
+landing document at its stable path. The documentation index does not give it a
+special ordering rule.
+
+This is a build-time release snapshot, not a live directory watcher. Editing the
+installed `/usr/local/share/doc/authd/` copy does not change the running binary.
+The source checkout is not required on the installed server. No runtime document
+path setting, upload endpoint, database table or migration is added.
 
 ## Rendering and security
 
-Every catalog, rendered document and raw-source/evidence request requires a live
-session with `system.admin`, like the rest of administration. These are not public
-operational pages. Responses remain `no-store` with the existing security headers.
+Every directory index, rendered page and raw-source/evidence request requires a
+live session with `system.admin`. Responses retain `no-store` and the existing
+security headers. Documentation reads do not scan users, roles or clients.
 
-The portal parses the finite embedded files once and caches immutable rendered
-pages. Reading a page does not scan the user/role/client catalogs. It does not
-read the host filesystem or fetch a requested URL. The request can select only
-an exact embedded catalog name; traversal and noncatalog names return 404.
+The finite embedded tree is parsed once and rendered into an immutable catalog.
+Requests select exact discovered names, never host filesystem paths or remote
+URLs. Traversal and missing names return 404. Environment files, credentials,
+source code, SQL, service files, deployment JSON/text and repository internals are
+not served. Document
+symlinks, invalid UTF-8 and oversized inputs are refused.
 
 The parser is an isolated, unmodified `rsc.io/markdown` snapshot used by the Go
-toolchain; see [Third-party code](../THIRD_PARTY.md). authd's renderer uses a fixed
-HTML element set and escapes raw HTML. Script/data/file URLs and scheme-relative
-links are refused. External links require an ordinary explicit click. Images are
-rendered as descriptive links rather than fetched into the administrator's page.
-Fenced code, reference links, nested lists, task lists, blockquotes and tables are
-supported. This is not an unrestricted HTML or Markdown application.
+toolchain; see [Third-party code](../THIRD_PARTY.md). The renderer escapes raw HTML,
+restricts links, and never fetches remote images. Fenced code, reference links,
+lists, blockquotes, tables and heading navigation remain supported. File-derived
+titles and paths receive the same HTML escaping as other template data.
 
 ## Navigation
 
 The left rail uses local inline outline SVGs with accessible text names. Normal,
-hover and selected links have no shaded backgrounds or button shadows. Selection
-uses a narrow edge indicator and `aria-current`; keyboard focus retains its
-visible outline. The rail can scroll on short viewports without losing the
-account link. See [Design language](../DESIGN_LANGUAGE.md).
+hover and selected links remain transparent and shadow-free. Selection uses a
+narrow edge line and `aria-current`; keyboard focus remains visible. Short
+viewports can scroll the rail. See [Design language](../DESIGN_LANGUAGE.md).

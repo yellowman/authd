@@ -94,6 +94,7 @@ def run(manifest: dict[str, str]) -> None:
                         page.set_content(source("/admin/?view=" + view), wait_until="domcontentloaded")
                         page.add_style_tag(content=css)
                         assert_rail()
+                        assert "BDC Maps integration profile" not in page.locator("body").inner_text()
                         if view == "guide":
                             article = page.locator(".markdown-body").inner_text()
                             assert "Adding an app to authd" in article
@@ -105,7 +106,13 @@ def run(manifest: dict[str, str]) -> None:
                         page.add_style_tag(content=css)
                         assert_rail()
                         assert page.locator("h1").count() == 1
-                        if label != "documentation":
+                        if label == "documentation":
+                            names = page.locator(".doc-entry strong").all_text_contents()
+                            assert names and all(n.lower().endswith(".md") for n in names), names
+                            directories = page.locator(".doc-group h2").all_text_contents()
+                            assert "./" in directories and "docs/" in directories, directories
+                            assert all(d.endswith("/") for d in directories), directories
+                        else:
                             for link in page.locator(".doc-toc a").all():
                                 fragment = link.get_attribute("href")[1:]
                                 assert page.evaluate("id => !!document.getElementById(id)", fragment), fragment
@@ -148,6 +155,7 @@ def run(manifest: dict[str, str]) -> None:
                     for view in ("guide", "users", "roles", "permissions", "clients", "sessions", "keys", "audit"):
                         response = page.goto(origin + "/admin/?view=" + view)
                         assert response.status == 200, f"cannot render {view}"
+                        assert "BDC Maps integration profile" not in page.locator("body").inner_text()
                         if view == "guide":
                             assert page.get_by_role("heading", name="Adding an app to authd").count() == 1
                         viewport_check(f"{view}-{width}")
@@ -157,9 +165,9 @@ def run(manifest: dict[str, str]) -> None:
                 submit("/admin/permissions/create", 'form[action="/admin/permissions/create"] button', 303)
                 page.goto(origin + "/admin/?view=clients")
                 form = page.locator('form[action="/admin/clients/create"]')
-                form.locator('[name="client_id"]').fill("bdcmaps")
-                form.locator('[name="name"]').fill("BDC Maps")
-                form.locator('[name="redirect_uris"]').fill("https://maps.example.test/auth/callback")
+                form.locator('[name="client_id"]').fill("inventory")
+                form.locator('[name="name"]').fill("Inventory")
+                form.locator('[name="redirect_uris"]').fill("https://inventory.example.test/auth/callback")
                 form.locator('[name="identity_scopes"][value="groups"]').check()
                 submit("/admin/clients/create", 'form[action="/admin/clients/create"] button.button-primary', 200)
                 assert "OIDC_CLIENT_SECRET" in page.locator("body").inner_text()

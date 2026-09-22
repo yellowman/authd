@@ -1,0 +1,17 @@
+--- FAIL: TestIndexComesFromDirectoriesAndMarkdown (0.00s)
+    directory_test.go:36: directory/file listing:
+         got [Get started|docs/ADDING_AN_APP.md Install and operate|deploy/new-platform/notes/README.md Design and reference|README.md Design and reference|docs/operations/ALPHA.md Design and reference|docs/operations/ZED.md Design and reference|docs/operations/no-heading.MD]
+        want [.|README.md deploy/new-platform/notes|deploy/new-platform/notes/README.md docs|docs/ADDING_AN_APP.md docs/operations|docs/operations/ALPHA.md docs/operations|docs/operations/ZED.md docs/operations|docs/operations/no-heading.MD]
+--- FAIL: TestIndexFollowsAddedRenamedEditedAndRemovedFiles (0.00s)
+    directory_test.go:55: new file not discovered: [{Name:Design and reference Entries:[{Path:docs/new-directory/two.md Title:New heading Description:docs/new-directory/two.md Category:Design and reference URL:/admin/docs?doc=docs%2Fnew-directory%2Ftwo.md}]}]
+--- FAIL: TestIndexOnlyListsMarkdownAndRejectsDocumentSymlinks (0.00s)
+    directory_test.go:69: non-Markdown indexed: [{Name:Design and reference Entries:[{Path:docs/one.md Title:One Description:docs/one.md Category:Design and reference URL:/admin/docs?doc=docs%2Fone.md}]}]
+FAIL
+FAIL	github.com/yellowman/authd/internal/docsite	0.004s
+2026/09/22 22:54:41 INFO request id=nv2lFHuQV0pQxmZqDZL15w method=GET duration_ms=0
+2026/09/22 22:54:41 INFO request id=o0hHc120U6lhvIbWLd7V9g method=GET duration_ms=0
+--- FAIL: TestClientHelpDoesNotSpecialCaseAnApplication (0.02s)
+    operator_help_test.go:209: application ID changes help, links, or UI beyond the saved identifier
+FAIL
+FAIL	github.com/yellowman/authd/internal/web	0.023s
+FAIL

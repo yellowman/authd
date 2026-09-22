@@ -309,8 +309,8 @@ label > small { display: block; font-weight: 400; font-size: 12px; line-height: 
 .doc-group h2 { font-size: 13px; color: var(--muted); padding-bottom: 10px; border-bottom: 1px solid var(--line-strong); }
 .doc-entry { display: grid; grid-template-columns: minmax(180px,1fr) minmax(0,2fr); gap: 4px 24px;
   padding: 14px 0; border-bottom: 1px solid var(--line); }
-.doc-entry strong { font-size: 14px; font-weight: 600; }
-.doc-entry span { color: var(--text); font-size: 13px; }
+.doc-entry strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.doc-entry span { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .doc-entry code { grid-column: 2; color: var(--muted); font-size: 11px; }
 .doc-entry:hover strong { text-decoration: underline; text-underline-offset: 3px; }
 .doc-image, .doc-unlinked { overflow-wrap: anywhere; }

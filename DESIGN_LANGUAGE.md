@@ -24,7 +24,7 @@ Use a narrow centered content column with a small product mark, one strong headi
                  AUTHD
 
             Sign in
-     Continue to BDC Maps
+     Continue to the application
 
      Username
      ┌───────────────────────┐
@@ -302,11 +302,13 @@ owns its visible-tooltip/accessibility name. aria-current and a narrow edge line
 identify selection. Keyboard focus remains visibly outlined.
 
 Start here MUST begin with the generic adding-an-app Markdown workflow. It is not
-a BDC-specific onboarding page, a release summary or an automated readiness report.
+an application-specific onboarding page, a release summary or an automated readiness report.
 A separate Documentation rail destination exposes the complete product Markdown
 catalog, with search, table of contents and original-source access. Render docs
-from the original embedded files, not hand-maintained HTML copies. App-specific
-profiles stay under Connect applications.
+from the original embedded files, not hand-maintained HTML copies. The index is
+an alphabetical directory/file listing with titles read from Markdown headings,
+not hand-authored categories or per-application links. Built-in help must not
+branch on client IDs; saved app names remain ordinary data.
 
 Keep reading layouts quiet: text and hairlines, no document cards, no remote
 fonts or scripts. Code and tables scroll within the reading column. Test long

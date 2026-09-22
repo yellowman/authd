@@ -1310,7 +1310,7 @@ When login is servicing an OIDC request, show the target client name:
 
 ```text
 Sign in
-Continue to BDC Maps
+Continue to the application
 ```
 
 Authentication failure message remains generic:
@@ -2384,8 +2384,9 @@ The admin landing view MUST offer a first-application procedure and navigation t
 users, roles, clients, and troubleshooting. Section/field help MUST distinguish
 people, roles/groups, application permissions, registered clients, public issuer,
 callback URI, client secret, signing keys, master key, and PostgreSQL identities.
-An allowed scope is not implicitly requested or granted. The current BDC role-name
-mapping MUST be documented separately from scope-based permission enforcement.
+An allowed scope is not implicitly requested or granted. Role-name mapping MUST
+be distinguished from scope-based permission enforcement without singling out
+any application in built-in help or form behavior.
 
 Saved client connection details MUST derive from persisted client state and the
 configured public issuer, not request Host or client-supplied help text. They MUST
@@ -2412,8 +2413,10 @@ Reference: Fetch Standard, “append a request Origin header”, and W3C Referre
 # 47. Documentation portal and navigation (v0.9.4)
 
 Administration starts with the generic `docs/ADDING_AN_APP.md` workflow, rendered
-from its original Markdown. App-specific integration profiles, including the
-verified first bdcmaps integration, MUST remain separate from that landing text.
+from its original Markdown. All built-in guidance MUST be application-neutral.
+A client ID MUST NOT select application-specific text, links, fields or defaults.
+Saved names and settings remain ordinary escaped data. Named integration evidence
+may exist in source documents, but MUST NOT receive special interface behavior.
 The guide explains client registration, callback/issuer values, identity-only
 versus role-name versus permission-scope use, role assignment, client secrets,
 app-side configuration and an actual end-to-end login test.
@@ -2426,9 +2429,15 @@ no-store/security headers. The portal MUST NOT expose runtime files, credentials
 source code, repository internals, arbitrary file paths or remote URL fetching.
 
 The catalog includes product Markdown at the repository root, under `docs/`, and
-native-deployment README files. Content is embedded in the binary from those
-original files and rendered once into an immutable catalog. Tests MUST detect a
-product Markdown file absent from the catalog. Tables, fenced code, nested lists,
+the recursive `deploy/` tree. Content is embedded in the binary from those
+original files and rendered once into an immutable catalog. The index MUST be
+derived by walking those directories, listing Markdown filenames alphabetically
+within their actual directory, and reading titles from Markdown headings. Files
+without headings use their filename. There MUST NOT be a filename/title/category
+registry, per-platform README list or per-application catalog logic. Adding,
+renaming or deleting a Markdown file MUST be reflected at the next build without
+an index-code edit. Tests MUST detect a product Markdown file absent from the
+catalog and verify previously unseen nested directories. Tables, fenced code, nested lists,
 reference links and heading navigation must remain readable. Raw HTML must be
 escaped and links restricted to safe schemes or known local destinations. Images
 must not load remote resources automatically. Search and navigation work without

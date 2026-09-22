@@ -1,0 +1,7 @@
+PASS: local links in all changed Markdown documents resolve.
+PASS: no built-in BDC-specific text, client-ID branch or app-specific secret-setting name in web templates.
+PASS: removed curated document description/category registry.
+PASS: shell and Python test-script syntax.
+PASS: Go formatting.
+PASS: git diff --check.
+Boundary: no full Go 1.26+ build, database execution, native form navigation or live service changed by these checks.

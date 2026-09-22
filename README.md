@@ -11,7 +11,6 @@ No LDAP, user YAML, frontend build system, or external policy service.
 | Understand the app and connect the first application | [Adding an app](docs/ADDING_AN_APP.md), or **Administration → Start here** in the browser |
 | Install from a new PostgreSQL host | [Deployment guide](DEPLOYMENT.md) |
 | Browse all documentation / explain a field | **Administration → Documentation**, [field reference](docs/FIELD_REFERENCE.md) |
-| Connect BDC Maps | [Two-sided BDC walkthrough](docs/BDCMAPS_INTEGRATION.md) |
 | Use a Unix socket behind nginx | [Unix sockets](docs/UNIX_SOCKET.md) |
 | Integrate another application | [RP integration contract](docs/RP_INTEGRATION.md) |
 | Upgrade an installed server | [Upgrade procedure](DEPLOYMENT.md#13-updating-an-existing-installation) |
@@ -41,14 +40,16 @@ member of every app. Conversely, a client that requests only identity may
 authenticate any enabled authd user; there is no separate client allowed-users
 list. Read the [operator guide](OPERATOR_GUIDE.md) before choosing a policy.
 
-## Current release: v0.9.4
+## Current release: v0.9.5
 
 Start here now renders a generic **Adding an app to authd** workflow from Markdown.
 Documentation is an authenticated portal for the complete shipped product docs,
 with full-text search, heading navigation, original source and internal links.
-App-specific profiles are separate documents. The sidebar has inline outline SVGs
-instead of letters, without shaded normal/hover/selected button backgrounds.
-Form labels and visible descriptions explain what to enter and what changes.
+The index now lists the actual Markdown filenames grouped by directory. Titles
+come from Markdown headings; new or renamed files need no catalog-code edit.
+Client forms and saved connection help are generic for every application, with
+no client-ID-specific links or configuration advice. The unshaded SVG sidebar
+and existing field explanations remain unchanged.
 
 **One complete application integration is verified: bdcmaps.** The operator
 reported a successful full login through the real application after v0.9.3.
@@ -84,7 +85,7 @@ make browser-check     # separate native-form Chromium gate; needs Python Playwr
 
 The browser tests use the actual HTTP handlers and templates with synthetic
 persistence/credentials. They do not replace real PostgreSQL, the Argon2 KDF,
-nginx, or the actual BDC callback. Browser tooling is a test dependency only;
+nginx, or an actual application's callback. Browser tooling is a test dependency only;
 authd serves its normal UI without JavaScript or a browser-testing runtime.
 See [browser test instructions](docs/BROWSER_TESTS.md) and `VALIDATION.md`.
 

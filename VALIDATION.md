@@ -1,9 +1,11 @@
-# Validation record — v0.9.4 documentation portal and navigation
+# Validation record — v0.9.5 generic interface and directory-derived documentation
 
-Base: `8ef6d03` (v0.9.3). This release adds an authenticated documentation portal,
-generic application onboarding, explanatory field labels and unshaded SVG
-navigation. It does not change OIDC grant handling, identity authority, the
-database, listener configuration or native service definitions.
+Base: `f2089cc` (v0.9.4). This update removes application-specific client help and
+curated document descriptions/categories. The index follows Markdown files and
+source directories. OIDC grant handling, identity authority, PostgreSQL,
+cryptography, listeners, dependency locks and native service definitions are
+unchanged. The existing first-real-application PASS below remains valid as
+reported; this interface update does not claim a new deployed-app test.
 
 ## First real application — bdcmaps: PASS
 
@@ -14,7 +16,7 @@ not just an authd token test or an in-memory client fixture.
 
 The [verbatim report](docs/validation/v0.9.3/external-bdcmaps-report.md) is retained.
 It arrived after the v0.9.3 delivery; no exact deployed commit or raw command log
-was supplied. It does not imply that the new v0.9.4 documentation UI was deployed
+was supplied. It does not imply that later documentation UI revisions were deployed
 there, or that every MFA, logout, role, proxy-hardening or recovery path was tested.
 
 | Scope | Current evidence |
@@ -23,6 +25,46 @@ there, or that every MFA, logout, role, proxy-hardening or recovery path was tes
 | v0.9.0 OpenBSD/PostgreSQL/live-provider qualification | **PASS — previously reported**, retained below |
 | Other applications / independent OpenID conformance certification | Not established by either report |
 | Native service installation, live MFA, recovery/restore and all proxy security scenarios | Not inferred from successful app login; qualify separately |
+
+## v0.9.5 checks performed here
+
+Environment: Linux/amd64, Go 1.23.2. Production still requires Go 1.26+ and the
+pinned module graph. Local component checks used the real toolchain-bundled
+`x/text` v0.16.0 source through an explicit temporary modfile, as described below;
+they are not qualification of production `x/text` v0.42.0, pgx or Argon2.
+
+| Check | Result and boundary |
+|---|---|
+| Before-fix witnesses | FAIL as intended: curated category grouping and client-ID-specific help reproduced |
+| Directory/file index | PASS: actual directory groups, filenames and source headings, no title/category registry |
+| Source changes | PASS: added, renamed, edited and removed documents; arbitrary nested docs/deployment paths; heading-less and mixed-case Markdown files |
+| Actual build-time discovery | PASS: added files beneath previously unknown docs/deploy subdirectories, rebuilt without touching embed/index code, removed the files and rebuilt again |
+| Client neutrality | PASS: identical help for the formerly special client ID and an unrelated ID after normalizing only the displayed saved identifier |
+| HTTP documentation | PASS: filenames, directories and title escaping; all listed Markdown pages/raw source readable; existing admin, query and traversal refusals retained |
+| Available component race tests and vet | PASS using the explicitly partial dependency setup; SQL integration bodies typechecked only |
+| Chromium layout | PASS: 34 desktop/mobile/short-viewport cases using actual rendered fixture HTML/CSS; folder headings, Markdown filenames and unshaded accessible SVG rail checked |
+| Protocol/storage/deployment invariance | PASS: 108 protected source/test/dependency/build/deployment files byte-identical to v0.9.4 |
+| Full executable / PostgreSQL / native browser authentication | NOT RERUN for this update; layout checks are not live form, database or relying-party qualification |
+
+No parser, security-header, authorization or form-submission logic changed.
+Named application details remain ordinary saved data or original Markdown
+content. The interface no longer injects instructions based on the client ID,
+and the index does not rank, suppress or customize documents by application name.
+
+### Retained v0.9.5 evidence
+
+Trailing whitespace is normalized in retained logs; results and values are unchanged.
+
+- [Before-fix regressions](docs/validation/v0.9.5/before.log).
+- [Component race/vet/typecheck checks](docs/validation/v0.9.5/component-checks.log).
+- [Build-time file discovery/removal](docs/validation/v0.9.5/embed-discovery.log).
+- [34 layout cases](docs/validation/v0.9.5/browser-layout.log).
+- [Browser layout summary](docs/validation/v0.9.5/layout-browser.json).
+- [Unchanged protocol/storage/deployment files](docs/validation/v0.9.5/unchanged-runtime.log).
+- [Static and final-source checks](docs/validation/v0.9.5/static-checks.log).
+
+The v0.9.4 checks below are historical records for that release, not newly run
+v0.9.5 fuzz, native-browser or service-install results.
 
 ## v0.9.4 checks performed here
 

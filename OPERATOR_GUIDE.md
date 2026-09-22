@@ -78,9 +78,9 @@ registering the client; copying connection details; and testing from the app.
 You only configure the access model that the app actually implements.
 
 Administration → Start here renders that same Markdown. Documentation provides
-all shipped guides, searchable by name and content, with a table of contents and
-original Markdown source. App-specific profiles are separate documents under
-Connect applications. See [Field reference](docs/FIELD_REFERENCE.md) when a form
+all shipped Markdown files grouped by their actual directory, searchable by
+filename and content, with heading navigation and original source. The index
+follows the documentation tree automatically at build time. See [Field reference](docs/FIELD_REFERENCE.md) when a form
 label needs more explanation.
 
 ## 5. When do I use permissions?

@@ -86,7 +86,7 @@ func (m *helpClientStore) AdminSigningKeys(context.Context, []byte) ([]oidc.Sign
 }
 func helpProvider(t *testing.T, s *Server) *helpClientStore {
 	t.Helper()
-	m := &helpClientStore{client: oidc.Client{ID: userID, ClientID: "bdcmaps", Name: "BDC Maps", Type: "confidential", Enabled: true, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email", "groups"}, AccessTokenTTL: 5 * time.Minute}}
+	m := &helpClientStore{client: oidc.Client{ID: userID, ClientID: "inventory", Name: "Inventory", Type: "confidential", Enabled: true, RedirectURIs: []string{"https://inventory.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email", "groups"}, AccessTokenTTL: 5 * time.Minute}}
 	svc, err := oidc.NewService(m, s.auth, s.cfg.Issuer, []byte("0123456789abcdef0123456789abcdef"), time.Minute, 24*time.Hour, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestClientConnectionDetailsAreSavedValuesNotHostInput(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	for _, text := range []string{"Copy into", s.cfg.Issuer, "https://maps.example.test/auth/callback", "openid profile email groups", "OIDC_CLIENT_SECRET"} {
+	for _, text := range []string{"Copy into", s.cfg.Issuer, "https://inventory.example.test/auth/callback", "openid profile email groups", "client_secret_post", "client_secret_basic"} {
 		if !strings.Contains(w.Body.String(), text) {
 			t.Errorf("missing %s", text)
 		}
@@ -126,10 +126,10 @@ func TestCreatedSecretPageIncludesConnectionInstructions(t *testing.T) {
 	s, _, m := fixture(t, true)
 	helpProvider(t, s)
 	h, _ := s.Handler()
-	values := url.Values{"csrf_token": {s.auth.CSRF(m.raw, "session")}, "client_id": {"bdcmaps"}, "name": {"BDC Maps"}, "client_type": {"confidential"}, "enabled": {"on"}, "access_token_ttl": {"300"}, "redirect_uris": {"https://maps.example.test/auth/callback"}, "identity_scopes": {"openid", "profile", "email", "groups"}}
+	values := url.Values{"csrf_token": {s.auth.CSRF(m.raw, "session")}, "client_id": {"inventory"}, "name": {"Inventory"}, "client_type": {"confidential"}, "enabled": {"on"}, "access_token_ttl": {"300"}, "redirect_uris": {"https://inventory.example.test/auth/callback"}, "identity_scopes": {"openid", "profile", "email", "groups"}}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, request(s, m, "POST", "/admin/clients/create", values, true))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Copy into BDC Maps") || !strings.Contains(w.Body.String(), "OIDC_CLIENT_SECRET") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Copy into Inventory") || !strings.Contains(w.Body.String(), "protected runtime configuration") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
@@ -188,5 +188,28 @@ func TestFormFailuresOfferDifferentRecoveryWithoutWeakeningGuards(t *testing.T) 
 		if w.Code != 403 || m.mutationCalls != 0 || !strings.Contains(w.Body.String(), tc.want) {
 			t.Errorf("wrong refusal/recovery: %d %s", w.Code, w.Body.String())
 		}
+	}
+}
+
+// A client's ID is data, not a dispatch key for application-specific UI help.
+func TestClientHelpDoesNotSpecialCaseAnApplication(t *testing.T) {
+	s, _, m := fixture(t, true)
+	store := helpProvider(t, s)
+	store.client.Name = "Example application"
+	h, err := s.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(id string) string {
+		store.client.ClientID = id
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, request(s, m, "GET", "/admin/?client="+userID, nil, true))
+		if w.Code != 200 {
+			t.Fatalf("client page: %d", w.Code)
+		}
+		return strings.ReplaceAll(w.Body.String(), id, "CLIENT-ID")
+	}
+	if render("bdcmaps") != render("ordinary-app") {
+		t.Fatal("application ID changes help, links, or UI beyond the saved identifier")
 	}
 }

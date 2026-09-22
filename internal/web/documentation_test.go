@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/yellowman/authd/internal/docsite"
 )
 
 func TestDocumentationRequiresLiveAdministrator(t *testing.T) {
@@ -105,6 +108,52 @@ func TestSidebarUsesAccessibleSVGsAndCurrentPage(t *testing.T) {
 		for _, link := range adminNavigation(view) {
 			if !strings.Contains(rail, `aria-label="`+link.Label+`"`) {
 				t.Errorf("missing accessible name %s", link.Label)
+			}
+		}
+	}
+}
+
+// Exercise the HTTP index with filenames the product has never seen before.
+func TestDocumentationIndexUsesSourceTreeNotAnAppRegistry(t *testing.T) {
+	s, h, m := fixture(t, true)
+	var err error
+	s.docs, err = docsite.New(fstest.MapFS{
+		"README.md":                        {Data: []byte("# An authored overview\n")},
+		"docs/new-folder/guide & notes.md": {Data: []byte("# New & useful\n")},
+		"docs/new-folder/no-heading.md":    {Data: []byte("Plain documentation.\n")},
+		"docs/<unsafe>/entry.md":           {Data: []byte("# Heading\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, request(s, m, "GET", "/admin/docs", nil, true))
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"<code>./</code>", "<code>docs/new-folder/</code>",
+		"<strong>README.md</strong>", "An authored overview",
+		"<strong>guide &amp; notes.md</strong>", "New &amp; useful",
+		"<strong>no-heading.md</strong>", "4 documents in this release",
+		"<code>docs/&lt;unsafe&gt;/</code>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index did not reflect source tree: missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"<unsafe>", "Get started</h2>", "Connect applications</h2>", "BDC Maps", "BDCMAPS_INTEGRATION"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("invented category/app or unsafe path: %q", unwanted)
+		}
+	}
+	for _, group := range s.docs.Groups("") {
+		for _, e := range group.Entries {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, request(s, m, "GET", e.URL, nil, true))
+			if w.Code != 200 {
+				t.Errorf("discovered document not readable: %s: %d", e.Path, w.Code)
 			}
 		}
 	}

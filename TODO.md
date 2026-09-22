@@ -128,3 +128,10 @@ exercise native rcctl start/check/restart/stop and a SIGKILL/restart, inspect
 actual worker supplementary groups and chroot reachability, run Linux's full
 race/systemd gate, and exercise the real HTTPS/RP path. The repository's Linux
 socket/proxy fixtures do not constitute these deployment approvals.
+
+## v0.9.5 documentation index
+
+- [x] Generic connection help for every client, with no named-client branches.
+- [x] Directory-derived Markdown list, filenames and source headings; no curated metadata.
+- [x] Discover newly added nested docs/deployment files without editing an index.
+- [x] Retain the completed first-app integration record separately from local UI tests.

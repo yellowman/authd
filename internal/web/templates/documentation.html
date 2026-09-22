@@ -6,9 +6,9 @@
 <aside class="doc-aside" aria-label="Document navigation"><details class="doc-toc" open><summary>On this page</summary><nav aria-label="On this page">{{range .Document.TOC}}{{if le .Level 3}}<a class="toc-level-{{.Level}}" href="#{{.ID}}">{{.Text}}</a>{{end}}{{end}}</nav></details><p class="field-help">Source: <code>{{.Document.Path}}</code><br>Read-only documentation shipped with this release.</p></aside>
 </div>
 {{else}}
-<section class="guide-intro"><h2>Documentation library</h2><p>Setup, day-to-day administration, integration profiles, design and validation. Select a document to read its Markdown here.</p><p><a href="/admin/?view=guide">Start with adding an app to authd</a></p></section>
+<section class="guide-intro"><h2>Documentation library</h2><p>Markdown files from this release, grouped by their source directory. Select a filename to read the document.</p><p><a href="/admin/?view=guide">Start with adding an app to authd</a></p></section>
 <form method="get" action="/admin/docs" class="doc-search"><label for="doc-search">Search documentation<input id="doc-search" name="q" type="search" maxlength="200" value="{{.DocumentQuery}}" placeholder="Try roles, Unix socket, or refresh tokens"></label><button class="button" type="submit">Search</button>{{if .DocumentQuery}}<a href="/admin/docs">Clear search</a>{{end}}</form>
-<p class="field-help">{{.DocumentCount}} documents in this release. Search matches titles, paths and contents.</p>
-<div class="doc-catalog">{{range .DocumentGroups}}<section class="doc-group"><h2>{{.Name}}</h2>{{range .Entries}}<a class="doc-entry" href="{{.URL}}"><strong>{{.Title}}</strong><span>{{.Description}}</span><code>{{.Path}}</code></a>{{end}}</section>{{else}}<p role="status">No documents match this search. Try a shorter term or clear the search.</p>{{end}}</div>
+<p class="field-help">{{.DocumentCount}} documents in this release. Search matches filenames, headings and contents. Adding, moving or removing a Markdown file updates this list on the next build.</p>
+<div class="doc-catalog">{{range .DocumentGroups}}<section class="doc-group"><h2><code>{{.Name}}/</code></h2>{{range .Entries}}<a class="doc-entry" href="{{.URL}}"><strong>{{.Name}}</strong><span>{{if ne .Name .Title}}{{.Title}}{{end}}</span><code>{{.Path}}</code></a>{{end}}</section>{{else}}<p role="status">No documents match this search. Try a shorter term or clear the search.</p>{{end}}</div>
 {{end}}
 {{end}}

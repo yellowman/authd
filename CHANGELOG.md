@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.9.5 — application-neutral UI and directory-derived documentation
+
+Removed the named-client help branch from saved connection and secret pages.
+All clients receive the same generic instructions based only on saved settings.
+The documentation index now lists actual directories and Markdown filenames,
+using headings from source files instead of curated descriptions/categories.
+New files and nested deployment documentation are discovered at build time with
+no filename registration. Existing Markdown content and the verified first-app
+login record remain source evidence, not special UI behavior.
+
+No grant, identity, database, dependency, listener or service-definition changes.
+Rebuild/install/restart; no migration, rebootstrap or credential rotation.
+
 ## v0.9.4 — generic documentation portal and unshaded SVG navigation
 
 Start here renders the original adding-an-app Markdown rather than a BDC-specific
