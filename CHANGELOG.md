@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.1 — real PostgreSQL/OpenBSD qualification fixes
+
+Incorporated defects found by an external OpenBSD/amd64 Go 1.27 and disposable PostgreSQL qualification run. Refresh-token creation/rotation now casts both `LEAST` timestamp parameters explicitly to `timestamptz`, avoiding PostgreSQL's indeterminate-parameter-type error with database/sql/pgx. The PostgreSQL integration helper no longer hard-codes an expected migration count; `CheckSchema` is already the authoritative exact embedded-manifest check, so future migrations cannot stale a duplicate count assertion.
+
+Committed the real dependency lock state (`go.sum`) and raised the module minimum to Go 1.26 because the pinned `golang.org/x/crypto v0.57.0` itself requires Go 1.26. Added `make verify-openbsd`, which runs formatting, unit tests, vet, build, and the real PostgreSQL integration suite without the unsupported race detector; release qualification still requires the race suite on a supported Go platform.
+
+External qualification exercised the real authd executable, bootstrap/setup/login forms, admin OIDC client registration, discovery, Authorization Code + PKCE, `client_secret_post`, ID-token claims, UserInfo, and refresh rotation. Actual bdcmaps callback/deployment, production HTTPS/proxying, live MFA, runtime-role separation, backup/restore, rc.d boot, race testing, master-key rotation, and external OIDC conformance remain open.
+
 ## v0.8 — RP integration and authentication context
 
 Added a binding relying-party integration contract: durable identity is `(iss, sub)`; mutable profile/role claims are not identity keys; matching email never silently links an existing RP account; and authd authentication never creates application-local tenant, organization, PBX, project, case, boundary, workspace, room, or resource membership. Documented identity-only, hybrid, and authd-authorized RP modes, local-identity coexistence, and the Evident pattern where a product gateway may trust customer OIDC/SAML providers directly rather than forcing federation through authd.
@@ -14,7 +22,7 @@ Separated schema ownership from normal runtime: `authd migrate` is now the expli
 
 Added safe internal failure observability. HTTP 5xx responses carry their request reference; structured logs emit only a bounded error class and request ID rather than raw driver/credential errors. Added regression coverage for secret-bearing internal errors, dependency-unavailable/deadline classification, migration manifest ordering, and real-PostgreSQL source coverage for migration-history drift.
 
-The v0.6 lifecycle controls remain unchanged. Full Go 1.25/real-pgx/PostgreSQL execution and actual bdcmaps interoperability remain external qualification gates.
+The v0.6 lifecycle controls remain unchanged. Full Go 1.26+/real-pgx/PostgreSQL execution and actual bdcmaps interoperability remain external qualification gates.
 
 ## v0.6 — lifecycle and operations
 
@@ -22,7 +30,7 @@ Completed the first destructive/maintenance control-plane slice: soft user delet
 
 Added PostgreSQL integration coverage for those lifecycle transitions and cleanup semantics. Added row-version optimistic concurrency for user, role, permission, and OIDC-client edit forms; stale saves fail with a conflict instead of overwriting a newer administrator change. Client deletion now atomically removes its durable authorization continuations, codes, redirects/scopes, and refresh families through the schema ownership boundary while existing short-lived JWTs expire normally. Signing-key administration redacts encrypted private material, and automatic cleanup never deletes signing keys. Added self-service display-name/email editing with fresh-session enforcement and automatic email-verification clearing. Added explicit trusted-proxy CIDRs with spoof-resistant right-to-left `X-Forwarded-For` resolution for audit and login-rate-limit source addresses.
 
-The full dependency-backed Go 1.25/PostgreSQL gate and actual bdcmaps interoperability remain external qualification requirements; see `VALIDATION.md`.
+The full dependency-backed Go 1.26+/PostgreSQL gate and actual bdcmaps interoperability remain external qualification requirements; see `VALIDATION.md`.
 
 ## v0.5 — OIDC provider
 

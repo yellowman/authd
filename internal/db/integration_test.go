@@ -86,10 +86,6 @@ func postgres(t *testing.T) (*db.IdentityStore, context.Context) {
 	if err = db.CheckSchema(ctx, conn); err != nil {
 		t.Fatal("current schema rejected:", err)
 	}
-	var n int
-	if err = conn.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 3 {
-		t.Fatalf("migration count %d: %v", n, err)
-	}
 	return &db.IdentityStore{DB: conn}, ctx
 }
 func require(t *testing.T, err error) {

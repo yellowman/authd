@@ -1,4 +1,4 @@
-.PHONY: deps fmt fmt-check test race vet build verify integration offline-check run migrate dev-db dev-db-down
+.PHONY: deps fmt fmt-check test race vet build verify verify-openbsd integration integration-openbsd offline-check run migrate dev-db dev-db-down
 
 deps:
 	go mod tidy
@@ -27,10 +27,19 @@ build:
 # Missing prerequisites are failures, not successful skipped checks.
 verify: fmt-check test race vet build integration
 
+# Go does not support -race on OpenBSD/amd64. This is the native OpenBSD gate;
+# release qualification still requires `make race` on a race-supported platform.
+verify-openbsd: fmt-check test vet build integration-openbsd
+
 integration:
 	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
 	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
 	go test -race -count=1 -tags=integration ./internal/db
+
+integration-openbsd:
+	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
+	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
+	go test -count=1 -tags=integration ./internal/db
 
 offline-check:
 	./scripts/check-offline.sh

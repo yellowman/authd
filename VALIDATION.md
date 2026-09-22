@@ -1,4 +1,35 @@
-# v0.8 validation record
+# v0.8.1 validation record
+
+## External OpenBSD/PostgreSQL qualification — 2026-09-22
+
+An independent test copy was built and exercised on OpenBSD/amd64 with Go 1.27 and a disposable real PostgreSQL schema. The test found two repository defects that are fixed in v0.8.1: the integration helper had a stale hard-coded migration count after migration 004, and PostgreSQL required explicit `timestamptz` casts for the two parameters passed to `LEAST` when inserting refresh-token idle expiry. The migration-count duplication was removed rather than changed from 3 to 4 because `CheckSchema` already validates the exact embedded manifest.
+
+Exercised successfully after those fixes:
+
+- OpenBSD/amd64 build with Go 1.27;
+- unit tests for identity, password parsing, crypto, OIDC, web, TOTP, configuration, and database code;
+- `go vet` and formatting checks;
+- real PostgreSQL migrations/schema validation and identity/user/role/permission lifecycle;
+- sessions, bootstrap, cleanup, MFA recovery state, OIDC client registration, authorization continuations and one-use codes;
+- refresh rotation/replay/revocation, signing-key rotation, and client deletion cascades;
+- live authd process with PostgreSQL: bootstrap CLI, setup/login forms, admin client registration, discovery, login redirect, Authorization Code + PKCE, `client_secret_post`, ID-token claims, UserInfo, and refresh-token rotation.
+
+Not exercised by that run:
+
+- actual bdcmaps callback or the deployment at `maps.ykwc.com`;
+- HTTPS/nginx/certificates/secure production cookies/DNS/reverse-proxy headers;
+- non-loopback production issuer;
+- PostgreSQL runtime-role separation, TLS, backup/restore/failover;
+- OpenBSD `rc.d` installation/boot;
+- live MFA/TOTP enrollment/login;
+- live public-client or `client_secret_basic` flows (provider tests only);
+- external OIDC conformance testing;
+- race detector (`-race` is unsupported on OpenBSD/amd64);
+- master-key persistence/rotation and multi-instance behavior;
+- production bdcmaps schema/data.
+
+The external run generated the dependency lock state now committed as `go.sum`. The module minimum is Go 1.26 because `golang.org/x/crypto v0.57.0` declares Go 1.26.
+
 
 This is a source-delivery validation record, not a production signoff or an OIDC
 conformance certificate. No replacement pgx or x/crypto module is used by the
@@ -6,9 +37,9 @@ reported checks.
 
 ## Executed in the authoring environment
 
-The installed toolchain is Go 1.23.2. The production module requires Go 1.25 and
+The authoring container toolchain is Go 1.23.2. The production module requires Go 1.26 and
 its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.8 tree:
+Within that boundary, the following checks passed on the current v0.8.1 tree:
 
 | Check | Result and scope |
 |---|---|
@@ -83,17 +114,17 @@ that step proves Go-level interface/type coherence, not SQL execution.
 A direct full-suite attempt with the installed compiler fails before compilation:
 
 ```text
-go: go.mod requires go >= 1.25.0 (running go 1.23.2; GOTOOLCHAIN=local)
+go: go.mod requires go >= 1.26.0 (running go 1.23.2; GOTOOLCHAIN=local)
 ```
 
 PostgreSQL and a usable container runtime are also unavailable in this authoring
 environment. Therefore the following have **not** passed here:
 
-- full executable build using Go 1.25 and the real pgx/x/crypto modules;
+- full executable build using Go 1.26+ and the real pgx/x/crypto modules in this authoring container;
 - the actual Argon2id KDF round trip;
-- migrations 001/002/003/004 executed against PostgreSQL;
-- PostgreSQL transaction/concurrency assertions in the integration build tag;
-- the live daemon against a real PostgreSQL database;
+- migrations 001/002/003/004 executed against PostgreSQL in this authoring container;
+- PostgreSQL transaction/concurrency assertions in the integration build tag in this authoring container;
+- the live daemon against a real PostgreSQL database in this authoring container;
 - the actual private `yellowman/bdcmaps` application logging into authd;
 - an independent OIDC/OAuth conformance/interoperability suite;
 - current client-admin browser interaction against the live daemon;

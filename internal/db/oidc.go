@@ -305,7 +305,7 @@ func (s *OIDCStore) CreateRefreshFamily(ctx context.Context, userID, sessionID, 
  VALUES($1::uuid,$2::uuid,NULLIF($3,'')::uuid,ARRAY(SELECT jsonb_array_elements_text($4::jsonb)),$5,$6,ARRAY(SELECT jsonb_array_elements_text($7::jsonb))) RETURNING id::text`, userID, clientDBID, sessionID, listJSON(scopes), absoluteExpires, authTime, listJSON(authMethods)).Scan(&family); e != nil {
 			return e
 		}
-		_, e := tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3,$4),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, tokenHash, family, idleExpires, absoluteExpires, listJSON(scopes))
+		_, e := tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3::timestamptz,$4::timestamptz),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, tokenHash, family, idleExpires, absoluteExpires, listJSON(scopes))
 		return e
 	})
 }
@@ -388,7 +388,7 @@ func (s *OIDCStore) RotateRefreshToken(ctx context.Context, tokenHash, replaceme
 	if n, _ := res.RowsAffected(); n != 1 {
 		return out, oidc.ErrInvalidGrant
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3,$4),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, replacementHash, familyID, idleExpires, absExpires, listJSON(scopes)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3::timestamptz,$4::timestamptz),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, replacementHash, familyID, idleExpires, absExpires, listJSON(scopes)); err != nil {
 		return out, err
 	}
 	if err = audit(ctx, tx, "token.refresh", userID, "refresh_family", familyID, a); err != nil {

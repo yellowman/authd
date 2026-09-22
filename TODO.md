@@ -1,4 +1,4 @@
-# Implementation sequence — v0.8
+# Implementation sequence — v0.8.1
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -45,9 +45,10 @@ actual bdcmaps login remain the first external gates.
 
 - [x] Real-PostgreSQL integration test source and non-skipping gate definition.
 - [x] OIDC SQL lifecycle integration source added to that gate.
-- [ ] Run the integration suite against PostgreSQL with the actual pgx driver.
-- [ ] Resolve real pinned modules, review/commit `go.sum`, run full tests/build/vet.
-- [ ] End-to-end browser exercise against the actual daemon and database.
+- [x] Run the integration suite against PostgreSQL with the actual pgx driver.
+- [x] Resolve real pinned modules, review/commit `go.sum`, run full tests/build/vet on OpenBSD/amd64.
+- [ ] Full browser automation against the actual daemon and database (live setup/login forms were exercised manually).
+- [ ] Full race-detector suite on a supported Go platform (OpenBSD/amd64 does not support `-race`).
 
 ## Administration completion and operations
 

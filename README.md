@@ -7,13 +7,14 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-## v0.8 — relying-party contract and step-up
+## v0.8.1 — external PostgreSQL/OpenBSD qualification fixes
 
-v0.8 adds the relying-party identity/linking contract plus OIDC authentication-context step-up and provider-session correlation on top of the v0.7 deployment hardening. **This is implemented source, not production
-qualification.** The authoring
-environment cannot run PostgreSQL, download the selected Go 1.25 toolchain/modules,
-or run the actual private bdcmaps application. See `VALIDATION.md` for the exact
-evidence boundary.
+v0.8.1 incorporates fixes found by an external OpenBSD/amd64 + real PostgreSQL
+qualification run of v0.8. The live provider completed bootstrap, web login, client
+registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo,
+and refresh rotation against PostgreSQL. The actual private bdcmaps callback and
+production deployment remain unqualified. See `VALIDATION.md` for the exact evidence
+boundary.
 
 Implemented in this revision:
 
@@ -87,9 +88,8 @@ verifier; no recoverable primary password or NT hash is introduced for future AA
 
 ## Build and first use
 
-Use the project Go 1.25 toolchain (or a compatible newer version) and PostgreSQL.
-Resolve the pinned modules on a networked development machine and review/commit the
-resulting `go.sum`:
+Use Go 1.26 or newer and PostgreSQL. `golang.org/x/crypto v0.57.0` requires Go 1.26.
+The dependency lockfile is committed. `make deps` runs `go mod tidy` and `go mod verify`; it should leave the module files clean:
 
 ```sh
 make deps
@@ -161,6 +161,14 @@ export AUTHD_TEST_DATABASE_URL='postgres://authd:authd-dev-only@127.0.0.1:55432/
 make verify
 ```
 
+On OpenBSD/amd64, where the Go race detector is unavailable, use:
+
+```sh
+make verify-openbsd
+```
+
+A release still requires `make race` on a Go platform that supports the race detector.
+
 The database suite creates and removes a unique `authd_it_*` schema. Missing test
 configuration is a failure, never a skip. In addition to the v0.4 identity cases,
 the integration source now covers client registration, durable authorization
@@ -195,10 +203,12 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 
 ## Next delivery
 
-Run the real Go 1.25 + pgx/x/crypto + PostgreSQL gate and exercise the actual
-`yellowman/bdcmaps` client. Fix any interoperability findings before adding RADIUS
-or TACACS+. RADIUS remains PAP-first unless a concrete device forces explicit
-legacy credential support.
+Exercise the actual `yellowman/bdcmaps` callback against authd, then qualify the
+production-facing OpenBSD path: HTTPS/nginx/secure cookies/trusted proxy headers,
+runtime-role separation, and live TOTP step-up. Run the race suite on a supported
+Go platform and an independent OIDC interoperability/conformance suite before a
+production candidate. RADIUS remains PAP-first unless a concrete device forces
+explicit legacy credential support.
 
 ## Repository map
 
