@@ -1,31 +1,18 @@
-# PostgreSQL role split
+# PostgreSQL deployment assets
 
-`authd migrate` is the only normal executable path that performs DDL. Run it
-with a migration/owner connection. The daemon and `authd bootstrap` call only
-`CheckSchema` and can use a DML-only runtime role.
+The complete installation procedure is in [`../../DEPLOYMENT.md`](../../DEPLOYMENT.md).
 
-A simple deployment sequence is:
+This directory contains two different privilege stages:
 
-```sh
-# DATABASE_URL here belongs to the migration/owner role.
-authd migrate
+- `create-database.sql` runs as a PostgreSQL cluster administrator against the `postgres` maintenance database. It creates the dedicated authd database plus `authd_owner` and `authd_runtime` LOGIN roles, but deliberately sets no passwords. Use psql `\password` interactively afterwards.
+- `runtime-grants.sql` runs as `authd_owner` **against the authd database after `authd migrate`**. It grants the pre-existing `authd_runtime` role DML/sequence/schema usage, revokes schema CREATE from PUBLIC/runtime, and establishes matching default privileges for future migration-created objects.
 
-# Still connected as that migration owner, grant a pre-created runtime role DML.
-psql "$DATABASE_URL" \
-  -v authd_schema=public \
-  -v authd_runtime_role=authd_runtime \
-  -f deploy/postgresql/runtime-grants.sql
+The resulting trust split is:
 
-# Switch DATABASE_URL to the runtime login for all ordinary commands/processes.
-authd bootstrap
-authd
+```text
+cluster administrator -> create database/LOGIN roles + set passwords
+authd_owner           -> authd migrate + runtime-grants.sql
+authd_runtime         -> authd bootstrap + normal daemon
 ```
 
-The repository deliberately does not create LOGIN roles or store their
-passwords. Prefer a dedicated database/schema for authd. The runtime role needs
-`CONNECT` on the database plus the grants in `runtime-grants.sql`; it does not
-need table ownership or schema `CREATE` privileges.
-
-When a release adds migrations, run `authd migrate` with the migration role
-before restarting the daemon. An older schema or altered migration history makes
-normal startup fail closed with an instruction to run the migration command.
+The migration-owner password/DSN must not be stored in the daemon environment. The OpenBSD deployment uses `PGPASSFILE=/etc/authd/pgpass` for the runtime credential by default.

@@ -1,0 +1,49 @@
+#!/bin/ksh
+#
+# OpenBSD rc.d service for authd.
+#
+# The service environment is loaded from a root-controlled file rather than
+# encoded in rcctl flags. This preserves DATABASE_URL and authd configuration
+# across rcctl start/restart while keeping secrets out of rc.conf.local.
+
+daemon="/usr/local/bin/authd"
+daemon_user="_authd"
+authd_env_file="/etc/authd/authd.env"
+pexp="/usr/local/bin/authd.*"
+
+. /etc/rc.d/rc.subr
+
+rc_reload=NO
+
+rc_start() {
+	if [[ ! -r "${authd_env_file}" ]]; then
+		echo "${authd_env_file} is required" >&2
+		return 1
+	fi
+
+	# Validate the environment before asking rc.subr to drop privileges. set -a
+	# makes every assignment exported, matching the execution shell below.
+	set -a
+	. "${authd_env_file}" || return 1
+	set +a
+
+	if [[ -z "${DATABASE_URL}" || -z "${AUTHD_ISSUER}" ]]; then
+		echo "DATABASE_URL and AUTHD_ISSUER are required in ${authd_env_file}" >&2
+		return 1
+	fi
+	if [[ -z "${AUTHD_MASTER_KEY_FILE}" && -z "${AUTHD_MASTER_KEY}" ]]; then
+		echo "AUTHD_MASTER_KEY_FILE or AUTHD_MASTER_KEY is required in ${authd_env_file}" >&2
+		return 1
+	fi
+	if [[ -n "${PGPASSFILE}" && ! -r "${PGPASSFILE}" ]]; then
+		echo "PGPASSFILE ${PGPASSFILE} is not readable" >&2
+		return 1
+	fi
+
+	# rc_exec applies daemon_user. Source the environment again in that shell so
+	# variables are present after the privilege transition; this intentionally
+	# follows the WaveControl rc.d convention.
+	rc_exec "set -a; . \"${authd_env_file}\"; set +a; exec ${daemon} ${daemon_flags}"
+}
+
+rc_cmd $1

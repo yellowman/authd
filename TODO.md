@@ -1,4 +1,4 @@
-# Implementation sequence — v0.8.1
+# Implementation sequence — v0.8.2
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -66,6 +66,9 @@ actual bdcmaps login remain the first external gates.
 - [x] Explicit trusted-proxy IP parsing and deployment rate-limit guidance.
 - [x] Operator-visible internal error classification plus request correlation without leaking raw errors.
 - [x] Explicit migrate command plus dedicated migration/runtime PostgreSQL role boundary.
+- [x] Greenfield PostgreSQL database/LOGIN-role bootstrap SQL and complete `DEPLOYMENT.md`.
+- [x] Native OpenBSD `_authd` install layout and rc.d env-file propagation.
+- [ ] Fresh native OpenBSD install witness covering runtime-role separation, rc.d enable/start/restart/stop, and env/pgpass permissions.
 - [ ] Backup/restore and master-key rotation.
 - [ ] Dependency/vulnerability checks.
 

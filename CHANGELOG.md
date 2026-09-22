@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.2 — native deployment bootstrap and OpenBSD rc.d
+
+Added a complete `DEPLOYMENT.md` covering fresh PostgreSQL/OpenBSD installation: cluster initialization, dedicated `authd_owner` and `authd_runtime` LOGIN roles, database creation, interactive password assignment, owner-only migrations against the authd database, DML-only runtime grants, persistent master-key/runtime pgpass layout, bootstrap, HTTPS proxy boundary, upgrades, and backup minimums.
+
+Added `deploy/postgresql/create-database.sql`, hardened `runtime-grants.sql` to revoke schema CREATE from PUBLIC/runtime, and changed `authd migrate` so it requires only `DATABASE_URL`; migration credentials no longer need issuer/master-key configuration and are explicitly kept out of the daemon environment.
+
+Added a native OpenBSD `_authd` service account/install path and WaveControl-style `rc.d` script. `/etc/authd/authd.env` is sourced with `set -a` in both validation and daemon execution shells so environment variables survive rc.d privilege drop. `make install-openbsd` preserves an existing env/master key, generates the master key only on first install, installs pgpass/env templates, and provides rcctl-oriented enable/start/restart/status/stop targets.
+
 ## v0.8.1 — real PostgreSQL/OpenBSD qualification fixes
 
 Incorporated defects found by an external OpenBSD/amd64 Go 1.27 and disposable PostgreSQL qualification run. Refresh-token creation/rotation now casts both `LEAST` timestamp parameters explicitly to `timestamptz`, avoiding PostgreSQL's indeterminate-parameter-type error with database/sql/pgx. The PostgreSQL integration helper no longer hard-codes an expected migration count; `CheckSchema` is already the authoritative exact embedded-manifest check, so future migrations cannot stale a duplicate count assertion.

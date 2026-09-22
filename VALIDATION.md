@@ -1,4 +1,18 @@
-# v0.8.1 validation record
+# v0.8.2 validation record
+
+## v0.8.2 deployment-source additions — not yet externally rerun
+
+v0.8.2 adds greenfield PostgreSQL role/database bootstrap SQL, a full deployment guide, a native OpenBSD installer/service account layout, and an `rc.d` service adapted from the WaveControl env-file pattern. It also narrows `authd migrate` to `DATABASE_URL` only and adds `PGPASSFILE` as the recommended OpenBSD runtime password source. These new deployment artifacts have passed source/static/offline checks in the authoring environment but have **not yet** been rerun through a fresh native OpenBSD install, rc.d boot, or runtime-role separation witness. The successful external v0.8.1 provider/PostgreSQL evidence below remains valid for the core it exercised.
+
+Authoring-environment evidence for this tranche:
+
+- `./scripts/check-offline.sh` PASS after the deployment/code changes;
+- `git diff --check` PASS;
+- shell syntax PASS for the new rc.d wrapper and existing scripts; `make verify-openbsd` now includes native `ksh -n` checks for the rc.d wrapper and env template;
+- `make -n install-openbsd DESTDIR=...` expands without unintended host-side operations;
+- a staged `make install-openbsd DESTDIR=...` with a dummy executable produced only the binary, documentation, SQL assets, env/pgpass examples and rc.d file; it did **not** create an active env file, pgpass, master key, user or group inside the staging tree.
+
+The PostgreSQL `create-database.sql` and actual rc.d privilege/env behavior still need execution on the external OpenBSD/PostgreSQL host.
 
 ## External OpenBSD/PostgreSQL qualification — 2026-09-22
 
@@ -39,7 +53,7 @@ reported checks.
 
 The authoring container toolchain is Go 1.23.2. The production module requires Go 1.26 and
 its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.8.1 tree:
+Within that boundary, the following checks passed on the current v0.8.2 tree:
 
 | Check | Result and scope |
 |---|---|
@@ -131,7 +145,7 @@ environment. Therefore the following have **not** passed here:
 - backup/restore, master-key rotation, HA or production deployment qualification.
 
 The prior v0.4 Chromium fixture review covered the base Liminal-derived login,
-account and administration layout. v0.8's lifecycle/Clients/Keys/ACR branches is covered
+account and administration layout. v0.8/v0.8.2 lifecycle/Clients/Keys/ACR branches are covered
 by template rendering tests here, but it has not been re-reviewed in a live
 browser/daemon environment and is not claimed as such.
 

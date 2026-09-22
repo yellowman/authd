@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,26 +33,39 @@ func run() error {
 	if len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap" && os.Args[1] != "migrate") {
 		return errors.New("usage: authd [bootstrap|migrate]")
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
+	// Migration is a deployment/DDL operation and intentionally has a much
+	// smaller configuration surface than the daemon. The migration owner does
+	// not need the issuer or master key, and its DATABASE_URL should never be
+	// stored in the daemon environment file.
 	if len(os.Args) == 2 && os.Args[1] == "migrate" {
+		dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+		if dsn == "" {
+			return errors.New("DATABASE_URL is required")
+		}
+		pool, err := db.Open(ctx, dsn)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
 		if err := db.Migrate(ctx, pool); err != nil {
 			return fmt.Errorf("database migration failed: %w", err)
 		}
 		fmt.Fprintln(os.Stdout, "database schema is current")
 		return nil
 	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
 	if err := db.CheckSchema(ctx, pool); err != nil {
 		if errors.Is(err, db.ErrSchemaOutdated) {
 			return errors.New("database schema is missing or out of date; run authd migrate with the migration database role")

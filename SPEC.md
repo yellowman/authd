@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.8
+## Specification v0.8.2
 
-Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. v0.8.2 adds the complete greenfield PostgreSQL/OpenBSD deployment contract and native rc.d environment path. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -1585,7 +1585,11 @@ schema_migrations
 
 Migrations are embedded in the executable and applied only by the explicit `authd migrate` command, in filename/version order under a transaction-scoped PostgreSQL advisory lock. Migration execution and version records commit together; pooled connections MUST NOT retain a migration lock after cancellation or return. Normal daemon startup and `authd bootstrap` perform no DDL: they verify that the recorded migration versions/names exactly match the embedded migration manifest and fail closed if the schema is absent, behind, ahead, or has altered history.
 
-Production deployments SHOULD use a migration/owner PostgreSQL role for `authd migrate` and a separate DML-only runtime role for `authd` and `authd bootstrap`. The runtime role requires database connect, schema usage, table DML, and sequence usage but not table ownership or schema `CREATE`. Future migration-owner objects MUST preserve the runtime grants through reviewed default privileges. The repository provides a grant script but deliberately does not create LOGIN roles or manage database passwords.
+`authd migrate` is a deployment-only DDL command and MUST require only the migration database connection. It MUST NOT require the OIDC issuer, runtime master key, or other daemon-only secrets. The migration-owner DSN MUST NOT be stored in the normal daemon environment file.
+
+Production deployments SHOULD use a migration/owner PostgreSQL role for `authd migrate` and a separate DML-only runtime role for `authd` and `authd bootstrap`. The runtime role requires database connect, schema usage, table DML, and sequence usage but not table ownership or schema `CREATE`. Future migration-owner objects MUST preserve the runtime grants through reviewed default privileges. The repository provides greenfield PostgreSQL bootstrap SQL that may create the dedicated database and LOGIN roles, plus a reviewed runtime-grant script. PostgreSQL LOGIN passwords MUST remain operator-owned: repository SQL MUST NOT choose, embed, log, or persist those passwords.
+
+Native OpenBSD deployments SHOULD run the daemon as a dedicated unprivileged `_authd` account. The rc.d service MAY source a root-controlled runtime environment file, but it MUST export that environment in the daemon execution shell after the privilege transition so `DATABASE_URL`, `PGPASSFILE`, issuer, proxy trust, and master-key location reach the process. The migration-owner connection MUST remain separate from this runtime environment. When practical, the runtime PostgreSQL password SHOULD be supplied through a daemon-readable `PGPASSFILE` rather than embedded directly in `DATABASE_URL`.
 
 No external migration framework is required initially.
 
@@ -2239,7 +2243,7 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.8 implementation limits and evidence
+# 45. v0.8.2 implementation limits and evidence
 
 This revision implements the identity/bootstrap/session/MFA/admin source slice and
 the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE

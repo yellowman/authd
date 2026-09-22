@@ -1,0 +1,4 @@
+# PostgreSQL password file for the authd runtime account.
+# Install as /etc/authd/pgpass, replace CHANGE_ME, chown _authd:_authd, chmod 0400.
+# hostname:port:database:username:password
+127.0.0.1:5432:authd:authd_runtime:CHANGE_ME
