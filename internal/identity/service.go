@@ -106,6 +106,15 @@ func (s *Service) Bootstrap(ctx context.Context, token string, p Profile, passwo
 // Authenticate never creates a password-only session for an MFA-enrolled user.
 // Consumption of an OTP/recovery code and the session insertion are one commit.
 func (s *Service) Authenticate(ctx context.Context, username, password, factor, userAgent string, a Audit) (string, error) {
+	return s.authenticate(ctx, username, password, factor, userAgent, "", a)
+}
+
+// AuthenticateReplacing retires the browser's previous session atomically with
+// the new login. It is not explicit logout: existing offline grants keep their SID.
+func (s *Service) AuthenticateReplacing(ctx context.Context, username, password, factor, userAgent, previous string, a Audit) (string, error) {
+	return s.authenticate(ctx, username, password, factor, userAgent, previous, a)
+}
+func (s *Service) authenticate(ctx context.Context, username, password, factor, userAgent, previous string, a Audit) (string, error) {
 	if !s.limiter.Allow("login-ip:"+a.IP, 30, 2*time.Second) {
 		return "", ErrRateLimited
 	}
@@ -172,6 +181,9 @@ func (s *Service) Authenticate(ctx context.Context, username, password, factor, 
 	}
 	now := time.Now().UTC()
 	session := Session{TokenHash: Hash(raw), CSRFHash: Hash(s.CSRF(raw, "session")), User: rec.User, UserAgent: userAgent, IP: a.IP, AuthTime: now, AuthMethods: methods, IdleExpiresAt: now.Add(s.idle), AbsoluteExpiresAt: now.Add(s.absolute)}
+	if cryptoutil.ValidToken(previous) {
+		session.ReplacesTokenHash = Hash(previous)
+	}
 	if len(session.UserAgent) > 512 {
 		session.UserAgent = session.UserAgent[:512]
 	}
@@ -253,7 +265,7 @@ func (s *Service) SaveRole(ctx context.Context, actor string, edit RoleEdit, a A
 	return s.Store.SaveRole(ctx, Hash(actor), edit, a)
 }
 func (s *Service) CreatePermission(ctx context.Context, actor, name, description string, a Audit) error {
-	if err := ValidateName(name, description); err != nil {
+	if err := ValidatePermissionName(name, description); err != nil {
 		return err
 	}
 	switch name {
@@ -336,7 +348,7 @@ func (s *Service) SavePermission(ctx context.Context, actor string, edit Permiss
 	if edit.ExpectedUpdatedAt.IsZero() {
 		return Invalid("missing permission version")
 	}
-	if err := ValidateName(edit.Name, edit.Description); err != nil {
+	if err := ValidatePermissionName(edit.Name, edit.Description); err != nil {
 		return err
 	}
 	switch edit.Name {

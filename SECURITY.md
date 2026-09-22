@@ -27,7 +27,7 @@ Before adding a dependency, document why the standard library or an existing dep
 Until a project-specific security mailbox is established, report issues privately to the repository owner rather than filing a public issue containing exploit details.
 
 
-## v0.5 operational status
+## v0.9.0 operational status
 
 OIDC issuance is implemented in source, but this is not yet a production-qualified
 identity service. Do not expose it to production traffic before completing the real
@@ -38,10 +38,29 @@ replacement counts as release evidence.
 
 Keep master-key files owner-only. Use loopback-only development mode; production
 uses an HTTPS reverse proxy and authenticated PostgreSQL TLS. Forwarded IP headers
-are ignored until an explicit trusted-proxy implementation is reviewed. Run one
+are used only from configured trusted proxy CIDRs through the shared resolver. Run one
 active instance: limits and the demonstrated architecture do not claim HA support.
 
 Only an explicit local bootstrap command may display the initial setup token.
 Never put that token in a URL, system service logs, or persistent environment
 configuration. Setup cannot reopen when administrators are removed. Recovery and
 break-glass behavior still need a dedicated reviewed workflow.
+
+## Protocol and transaction safeguards
+
+Browser continuations are bound to the initiating browser; consent is also bound
+to the authenticated provider session. Request Objects and other unsupported
+protocol modes fail explicitly, rather than being mistaken for internal handles.
+`acr_values` is voluntary; mandatory MFA comes from client policy or an essential
+ACR selector. ID-token/access-token purposes remain distinct, and normal identity
+claim selectors cannot synthesize authority or application membership.
+
+Code/refresh redemption validates live authority and signs before changing
+credential state, all under one grant transaction. Successful response delivery
+requires successful commit; precommit failure rolls back consumption. Lost or
+ambiguous responses remain a distributed-system uncertainty, not permission to
+accept replays. RPs must serialize refreshes. Failure to contact storage is not
+invalid credentials or a successful revoke/logout.
+
+See docs/OIDC_AUDIT.md for the fixes, migration 005 and unexecuted SQL witnesses.
+The new transaction implementation must pass the real database gate before use.

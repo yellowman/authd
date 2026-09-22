@@ -52,7 +52,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	d.ReturnTo = safeReturn(r.URL.Query().Get("return_to"))
 	if raw := r.URL.Query().Get("oidc"); raw != "" {
-		if client, hint, ok := s.oidc.Pending(r.Context(), raw); ok {
+		if client, hint, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
 			d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
 			d.ReturnTo = "/authorize"
 		}
@@ -64,14 +64,20 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, r, err)
 		return
 	}
-	raw, err := s.auth.Authenticate(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.PostForm.Get("factor"), r.UserAgent(), auditInfo(w, r))
+	if flow := r.PostForm.Get("oidc_request"); flow != "" {
+		if _, _, ok := s.oidc.Pending(r.Context(), flow, s.cookie(r, "oidc_browser")); !ok {
+			s.failure(w, r, identity.ErrForbidden)
+			return
+		}
+	}
+	raw, err := s.auth.AuthenticateReplacing(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.PostForm.Get("factor"), r.UserAgent(), s.cookie(r, "session"), auditInfo(w, r))
 	if err != nil {
 		if errors.Is(err, identity.ErrCredentials) {
 			d := s.data("Sign in")
 			d.CSRF = s.auth.CSRF(s.cookie(r, "browser"), "browser")
 			d.ReturnTo = safeReturn(r.PostForm.Get("return_to"))
 			if raw := r.PostForm.Get("oidc_request"); raw != "" {
-				if client, hint, ok := s.oidc.Pending(r.Context(), raw); ok {
+				if client, hint, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
 					d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
 					d.ReturnTo = "/authorize"
 				}
@@ -83,18 +89,20 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// Fresh session token, never an upgrade of the pre-auth browser cookie.
-	// Retire this browser's old authenticated session after a successful new login.
-	if old := s.cookie(r, "session"); old != "" {
-		if previous, e := s.auth.Session(r.Context(), old); e == nil {
-			_ = s.auth.Store.RevokeSession(r.Context(), identity.Hash(old), previous.ID, false, auditInfo(w, r))
-		}
-	}
+	// The new session and retirement of the previous browser credential are
+	// already committed together. Reauthentication is not offline-grant revocation.
 	s.setCookie(w, "session", raw, s.cfg.SessionAbsoluteTTL)
 	s.setCookie(w, "browser", "", 0)
+	if session, e := s.auth.Session(r.Context(), raw); e != nil {
+		s.failure(w, r, e)
+		return
+	} else if session.User.ForcePasswordChange {
+		http.Redirect(w, r, "/account", http.StatusSeeOther)
+		return
+	}
 	if raw := r.PostForm.Get("oidc_request"); raw != "" {
-		if _, _, ok := s.oidc.Pending(r.Context(), raw); ok {
-			http.Redirect(w, r, "/authorize?request="+url.QueryEscape(raw), http.StatusSeeOther)
+		if _, _, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
+			http.Redirect(w, r, "/authorize/resume?flow="+url.QueryEscape(raw), http.StatusSeeOther)
 			return
 		}
 	}

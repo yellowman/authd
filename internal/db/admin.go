@@ -8,7 +8,7 @@ import (
 )
 
 func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identity.AdminData, err error) {
-	err = s.write(ctx, func(tx *sql.Tx) error {
+	err = s.read(ctx, func(tx *sql.Tx) error {
 		if _, e := requireSession(ctx, tx, hash, true, false, false); e != nil {
 			return e
 		}

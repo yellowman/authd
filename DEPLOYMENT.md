@@ -516,3 +516,52 @@ useful by itself, but remains highly sensitive.
 
 A complete automated backup/restore workflow remains release work; until that is
 implemented, deployment is not fully disaster-recovery qualified.
+
+## 15. v0.8.4 → v0.9.0 audit-release upgrade
+
+This is a real code/transaction change, not just a documentation release. Do not
+use the earlier external PostgreSQL pass as approval of migration 005. Run the
+new integration suite against a disposable database first, then test a restored
+copy of the installed database. Keep the database and its matching master key
+backups together. Stop/drain all authd instances before applying this migration;
+do not mix v0.8.4 and v0.9.0 processes on one schema.
+
+Before migration, connect to the **authd** database with the owner profile and
+check the existing permission catalog (substitute a configured schema if needed):
+
+```sql
+SELECT id, name FROM permissions
+WHERE name IN ('openid','profile','email','groups','roles','offline_access');
+```
+
+Any matches must be deliberately renamed or removed with their role/client/RP
+references reviewed. Migration 005 fails transactionally rather than silently
+changing what those grants mean. It does not rewrite applied migrations 001–004.
+
+Use the established stop/backup/new-binary `authd migrate`/runtime-grants/install/
+restart sequence. Only the owner migrates; the daemon keeps DML-only credentials.
+The migrated schema preserves users, primary credentials, MFA, signing keys,
+existing sessions and established offline families. The migration invalidates
+pending browser flows and unused codes lacking browser bindings; those callers
+restart login. Older consumed codes cannot retroactively acquire a descendant
+family link that was not recorded when they were issued.
+
+RPs should expect these protocol corrections:
+
+- `acr_values` is voluntary. Require MFA via client policy or essential `claims`.
+- Offline refresh issuance requires completed `prompt=consent` with `openid` and
+  `offline_access`; clients must handle the consent interaction.
+- Access JWTs now use `typ=at+jwt`. Older access JWTs with `typ=JWT` are refused by
+  UserInfo; refresh/reauthorize rather than allowing token-type confusion. ID
+  tokens remain `typ=JWT`. Existing offline families can mint new typed tokens.
+- Bare or cross-session logout shows confirmation; it does not automatically
+  end the current browser session. Explicit logout revokes associated offline
+  grants; ordinary reauthentication/natural session expiry does not.
+- Concurrent refresh of one family is an error/replay condition. Serialize it in
+  each RP, and restart authorization after an ambiguous lost refresh response.
+
+Rollback after a schema change is a restore of the matched database/key/config
+backup, not running an old binary on the newer schema. `CheckSchema` intentionally
+refuses that mismatch. It checks migration names/versions, not physical DDL or
+migration-file checksums. Installer reruns preserve active deployment files; they
+do not provide automatic data rollback.

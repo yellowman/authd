@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.8.4
+## Specification v0.9.0
 
-Status: binding product design. v0.8 adds the relying-party integration contract, authentication-context step-up (`acr`/`acr_values`), and stable provider-session correlation (`sid`) without expanding authd into a tenant directory or upstream identity broker. v0.8.4 defines a repeatable native deployment contract for PostgreSQL plus OpenBSD rc.d and Linux systemd: first install creates missing runtime state; ordinary upgrades preserve it while replacing program/service assets. See TODO.md and VALIDATION.md for remaining qualification and operations work.
+Status: binding product design; implementation corrected by the v0.9.0 protocol, transaction, and performance audit. See `docs/OIDC_AUDIT.md` and `VALIDATION.md`. This is not an OpenID certification or production signoff.
 
 ## 1. Purpose
 
@@ -724,6 +724,7 @@ Required OIDC/OAuth endpoints:
 GET  /.well-known/openid-configuration
 GET  /.well-known/oauth-authorization-server
 GET  /authorize
+POST /authorize
 POST /token
 GET  /jwks.json
 GET  /userinfo
@@ -745,7 +746,7 @@ GET  /admin/
 GET  /healthz
 ```
 
-Additional UI routes live beneath `/account/` and `/admin/`.
+Additional UI routes live beneath `/account/` and `/admin/`. Browser-only OIDC continuations use `GET /authorize/resume?flow=...`; consent uses `POST /authorize/consent`. The standard `request` parameter is never an internal handle.
 
 ---
 
@@ -765,6 +766,11 @@ Required fields include:
   "revocation_endpoint": "https://auth.example.com/revoke",
   "end_session_endpoint": "https://auth.example.com/logout",
   "response_types_supported": ["code"],
+  "response_modes_supported": ["query"],
+  "claim_types_supported": ["normal"],
+  "claims_parameter_supported": true,
+  "request_parameter_supported": false,
+  "request_uri_parameter_supported": false,
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "subject_types_supported": ["public"],
   "id_token_signing_alg_values_supported": ["RS256"],
@@ -793,7 +799,8 @@ Required fields include:
     "auth_time",
     "acr",
     "amr",
-    "sid"
+    "sid",
+    "at_hash"
   ],
   "acr_values_supported": [
     "urn:authd:acr:pwd",
@@ -811,187 +818,166 @@ The OAuth authorization-server metadata endpoint may use the same underlying met
 
 # 15. Authorization Endpoint
 
+Accept GET query serialization and POST `application/x-www-form-urlencoded`
+serialization. The only response type is `code`; only the default/query response
+mode is supported. Validate the client and exact registered redirect before
+sending any response to an RP. Malformed/ambiguous redirect or client parameters
+produce a local error, never a redirect to untrusted input.
+
 Example:
 
 ```text
-GET /authorize?
-    response_type=code&
-    client_id=bdcmaps&
-    redirect_uri=https%3A%2F%2Fbdc.example%2Fauth%2Fcallback&
-    scope=openid%20profile%20email%20groups&
-    state=...&
-    nonce=...&
-    code_challenge=...&
-    code_challenge_method=S256&
-    acr_values=urn%3Aauthd%3Aacr%3Amfa&
-    login_hint=user%40example.com
+/authorize?response_type=code&client_id=bdcmaps&redirect_uri=...&
+scope=openid%20profile%20email%20groups&state=...&nonce=...&
+code_challenge=...&code_challenge_method=S256
 ```
 
-The server validates the request before presenting a login form.
+Reject duplicate parameters, malformed percent encoding, invalid PKCE syntax,
+unsupported response modes, invalid scope grammar, and oversized input. Unknown
+ordinary optional parameters are ignored. `request`, `request_uri`, and
+`registration` are reserved standard parameters: because their features are not
+implemented, return the corresponding `request_not_supported`,
+`request_uri_not_supported`, or `registration_not_supported` error.
 
-Validation includes:
+## 15.1 Browser transaction
 
-```text
-client exists
-client enabled
-response_type == code
-redirect_uri exact match
-requested scopes recognized/allowed
-code_challenge present
-code_challenge_method == S256
-acr_values omitted or contains at least one supported authd ACR
+An authorization transaction records client, exact redirect, scopes, state,
+nonce, S256 challenge, supported claim selectors, required/preferred ACR,
+subject constraints, original `max_age`, prompts, creation and expiry. It is
+bound to the hash of an independent random HttpOnly browser cookie. Possession
+of the transaction handle alone MUST NOT resume or approve it in another browser.
+Transactions expire after ten minutes. Consent additionally binds the current
+provider-session ID; changing the authenticated account invalidates that consent.
+
+The transaction handle travels only on the internal resume route as `flow`.
+Code issuance consumes the transaction once and binds the resulting code to the
+user, provider `sid`, authentication time/method/context, claims and scopes.
+Codes are random, hash-only, single-use and valid for at most 60 seconds.
+Success and redirectable errors echo `state` unchanged and include issuer `iss`.
+
+## 15.2 Authentication and prompts
+
+Support `none`, `login`, `consent`, and `select_account`. `none` cannot be
+combined with another prompt. `select_account` currently uses an explicit
+fresh username/password ceremony, not a remembered multi-account picker.
+`login` and `max_age=0` require a ceremony after the transaction began. Positive
+`max_age` is measured at authentication completion/code issuance, not converted
+into a threshold frozen at request creation. Consent time cannot make an old
+password proof fresh. NumericDate claims have whole-second resolution.
+
+`prompt=none` never presents a form: missing authentication/required step-up
+returns `login_required`. `login_hint` may prefill a username but never proves
+identity. A supplied ID-token hint must be signed by this issuer for this client;
+its subject constrains which account may satisfy the transaction. A supported
+`claims.id_token.sub.value` or `.values` constraint is also enforced.
+
+## 15.3 Authentication context — preference versus requirement
+
+Supported contexts are `urn:authd:acr:pwd` and `urn:authd:acr:mfa`. MFA here means
+password plus enrolled TOTP or a single-use recovery code; it is not a claim of
+phishing resistance or a standardized assurance level.
+
+`acr_values` is an ordered **preference**, not a mandatory constraint. Authd
+attempts a supported preference when possible; an unknown/unavailable voluntary
+context does not by itself fail authentication. A nonessential `acr` claim
+request has the same voluntary character. RPs MUST inspect the returned `acr`.
+The earlier v0.8 rule treating any requested ACR as mandatory was incorrect.
+
+`require_mfa=true` is a mandatory client policy floor. For mandatory per-operation
+MFA, send an essential ACR claim selector, for example the URL-encoded JSON:
+
+```json
+{"id_token":{"acr":{"essential":true,"value":"urn:authd:acr:mfa"}}}
 ```
 
-The authorization transaction is bound to:
+Combine that with `max_age=300` to require recent authentication. Authd refuses an
+unachievable essential ACR using `unmet_authentication_requirements`; it never
+lowers the client's MFA floor. Essential `values` are alternatives, considered
+in order among supported contexts consistent with that floor. An essential ACR
+without a value constraint asks for an available ACR, not implicitly for MFA.
+When both syntaxes are supplied, an essential claim wins; otherwise a supported
+voluntary claim preference precedes `acr_values`. An essential `pwd` can be
+satisfied by a stronger ceremony, but the returned exact ACR names that selected
+context; `amr` still records the actual factors. Token refresh does not renew
+`auth_time` or turn an old proof into fresh MFA.
 
-```text
-client_id
-redirect_uri
-requested scope
-state
-nonce
-code_challenge
-required authentication context selected from acr_values/client policy
-login_hint (advisory only)
-created_at
-```
+## 15.4 Normal claim selection
 
-The eventual authorization code is additionally bound to:
+Support bounded `claims` JSON with `id_token` and `userinfo` destinations. A
+selector is null or an object; duplicate JSON members at any depth are refused.
+Supported selectable profile fields are `name`, `preferred_username`, `email`,
+and `email_verified`, plus the special authentication selectors above. Their
+release requires the corresponding profile/email capability to be allowed for
+the client, but selecting one field does not implicitly grant an entire scope.
+Each destination is independent. `value`/`values` constraints filter values;
+normal unavailable/nonmatching fields are omitted, never invented. Marking an
+ordinary profile field essential is not an authorization error. Subject and
+essential ACR constraints have the special semantics described above.
 
-```text
-user_id
-provider session id (`sid`)
-auth_time
-authentication context (`acr`)
-authentication methods (`amr`)
-granted scope
-```
+Unknown normal claims are omitted. No arbitrary tenant/permission claim mapping,
+claim expression language, aggregated/distributed claims, or language variants
+are implemented. `groups`/`roles` still require their explicitly requested and
+allowed scopes. Claim selectors persist through code exchange and refresh and
+are rechecked against current client claim-release policy.
 
-Authorization codes are:
+## 15.5 Consent and offline access
 
-```text
-single-use
-cryptographically random
-stored only as hashes
-lifetime <= 60 seconds
-```
+`prompt=consent` displays the client, requested scopes and additionally selected
+identity claims. Approval/denial uses a CSRF token bound to transaction, browser,
+and provider session. Denial consumes the pending request and returns
+`access_denied` without issuing a code. Normal first-party online access may use
+administrator-approved client policy without a consent page.
 
-Successful response:
-
-```text
-302 Location:
-https://client.example/callback?
-    code=...&
-    state=...&
-    iss=https%3A%2F%2Fauth.example.com
-```
-
-`state` is returned unchanged when supplied.
-
-The authorization response includes `iss`.
-
-## 15.1 Existing Provider Session
-
-A valid provider session may satisfy another client without re-entering credentials unless:
-
-- `prompt=login` is supplied;
-- `max_age` requires reauthentication;
-- target client requires MFA and current session is not MFA-authenticated;
-- security policy requires reauthentication for the requested operation.
-
-## 15.2 prompt
-
-v1 supports:
-
-```text
-prompt=none
-prompt=login
-```
-
-For `prompt=none`, if interaction is required:
-
-```text
-error=login_required
-```
-
-## 15.3 nonce
-
-If supplied, `nonce` is cryptographically bound to the transaction and returned unchanged in the ID token.
-
-## 15.4 login_hint
-
-`login_hint` may prefill the username/email field but MUST NOT bypass authentication or reveal whether the hinted account exists.
-
-## 15.5 Authentication context and step-up
-
-The provider supports these Authentication Context Class Reference values:
-
-```text
-urn:authd:acr:pwd
-urn:authd:acr:mfa
-```
-
-`urn:authd:acr:pwd` means the provider session has satisfied the normal local password authentication ceremony. A stronger MFA-authenticated session also satisfies a request for this context.
-
-`urn:authd:acr:mfa` means the provider session includes a successfully verified enrolled TOTP factor or one-time recovery code in addition to the password ceremony. The resulting ID Token contains both `acr` and `amr`.
-
-The authorization request MAY contain the standard `acr_values` parameter. Authd selects the first ACR value in the RP's ordered list that authd supports, subject to the client's configured minimum. A client with `require_mfa=true` has an effective minimum of `urn:authd:acr:mfa` even when the request omits `acr_values` or prefers the password context.
-
-When a current provider session is weaker than the required context and the account has an enrolled factor, authd requires interactive reauthentication/step-up before issuing an authorization code. `max_age` may be combined with `acr_values`; for example an RP may require fresh MFA by requesting `acr_values=urn:authd:acr:mfa` with `max_age=300`.
-
-If authd cannot satisfy the RP's authentication-context requirement, the Authorization Endpoint returns:
-
-```text
-error=unmet_authentication_requirements
-```
-
-Authd MUST NOT silently issue a token with a weaker `acr`.
+This version has no blanket prior-consent assumption for offline access. Issue a
+refresh family only for a client permitting refresh, an OIDC request containing
+`offline_access`, and completed explicit `prompt=consent`. Without these
+conditions ignore `offline_access`, report actual granted scopes, and issue no
+refresh token. Refuse a request with no effective scopes remaining.
 
 ---
 
 # 16. Token Endpoint
 
-Supported grants:
+Accept only form-encoded POST, with `authorization_code` or `refresh_token`.
+Confidential clients may use Basic or body authentication; public clients use
+`none` and mandatory S256 PKCE. Basic user/password fields follow OAuth form
+percent-decoding. Reject multiple authentication mechanisms, including an empty
+second `client_secret`, repeated parameters, mixed query/body credentials, and
+oversized bodies.
 
-```text
-authorization_code
-refresh_token
-```
+A code exchange supplies `code`, `redirect_uri`, `client_id` as applicable, and
+`code_verifier`. Validate current client proof, exact code client/redirect, S256,
+expiry, unconsumed state, live originating provider session, enabled user, current
+scope/claim permissions and client MFA policy.
 
-## 16.1 Authorization Code Exchange
+## 16.1 One durable issuance boundary
 
-Example confidential-body-auth request compatible with the current `bdcmaps` client:
+The code row or refresh-family row is locked before grant redemption. Verify
+current client-secret state again inside the transaction; an outside-of-transaction
+secret check cannot survive intervening rotation. Under the same authority gate,
+select the active signing key, prepare and sign the bounded response, consume the
+old credential, create the replacement/family, and insert the audit event. Return
+credentials only after COMMIT succeeds. Signing, storage and audit failure before
+commit rolls back the whole operation. No KDF or external network call occurs
+inside a grant transaction.
 
-```text
-POST /token
-Content-Type: application/x-www-form-urlencoded
+A correctly bound code replay is rejected and revokes its linked refresh family;
+wrong-client/wrong-verifier attempts cannot revoke the legitimate family. Keep
+replay tombstones while their issued family can still be used. JWT access tokens
+remain independently valid until their short expiry.
 
-grant_type=authorization_code&
-code=...&
-redirect_uri=https%3A%2F%2Fbdc.example%2Fauth%2Fcallback&
-client_id=bdcmaps&
-client_secret=...&
-code_verifier=...
-```
+## 16.2 Error and transport boundary
 
-The server verifies:
+Invalid credentials/grants/scopes use the appropriate OAuth error. Dependency
+failure is not evidence of invalid credentials: return HTTP 503 `server_error`
+with a bounded retry indication, no raw SQL/driver/secret material, and internal
+request correlation. Revocation follows the same failure distinction.
 
-```text
-authorization code exists
-authorization code unused
-authorization code unexpired
-client authentication valid
-client matches code
-redirect URI matches code
-PKCE verifier matches
-user still enabled
-client still enabled
-currently granted permissions still satisfy issued scope
-```
-
-The code becomes unusable atomically with successful exchange.
-
-Replay fails.
+Atomic database commit is not atomic HTTP delivery. A connection failure during
+COMMIT or loss of an already-committed response leaves the caller uncertain.
+There is no insecure refresh replay grace window. RPs serialize refreshes and
+must be prepared to perform a new authorization flow after an ambiguous lost
+response rather than repeatedly replaying an old refresh credential.
 
 ---
 
@@ -999,7 +985,7 @@ Replay fails.
 
 ## 17.1 Access Token
 
-Access tokens are signed JWTs.
+Access tokens are RS256 JWTs with JOSE `typ=at+jwt`. They are not ID tokens.
 
 Default lifetime:
 
@@ -1048,7 +1034,7 @@ Example:
 }
 ```
 
-Claims are included according to requested/allowed scopes.
+ID tokens use JOSE `typ=JWT`. They also carry `at_hash`, the base64url-encoded left half of SHA-256 of the associated access token. Claims are included according to requested/allowed scopes and supported destination-specific claim selectors.
 
 `sub` is always included.
 
@@ -1092,7 +1078,17 @@ Signing private keys are encrypted at rest using deployment master-key material 
 
 Public keys remain in JWKS long enough to validate all non-expired tokens signed by them.
 
-Key retirement and key deletion are separate operations.
+Key retirement and key deletion are separate operations. Only rotation/retirement
+is currently implemented; old public keys are retained. Startup must decrypt and
+validate the active private key against its advertised public JWK, including when
+another process wins first-key creation. Wrong master-key material fails startup.
+
+Verification pins RS256, the configured issuer, token type and expected claim
+shape. Reject duplicate JSON members, unsupported JOSE critical/b64 headers,
+malformed or inconsistent RSA JWKs, and JWTs exceeding 16 KiB. Issuance uses the
+same size limit; oversized role/claim output fails transactionally, not by
+truncating authorization. Parsed key caches are bounded and fingerprinted by
+key material; they never cache user, client or authorization decisions.
 
 ---
 
@@ -1117,7 +1113,7 @@ Refresh tokens are issued only when:
 offline_access
 ```
 
-was requested and the client permits refresh tokens.
+was requested, the client permits refresh tokens, and the browser completed explicit offline-access consent under §15.5.
 
 Every successful refresh rotates the refresh token:
 
@@ -1142,7 +1138,12 @@ original granted scope
 family
 ```
 
-Refresh can never expand scope beyond the original grant.
+Refresh can never expand scope beyond either the original grant or the latest
+narrowed token. Rotation cannot extend the family's absolute expiry. Recalculate
+current permissions and claim policy each time. Keep the original `auth_time`,
+`acr`, authentication methods and `sid`; refresh does not create a new ceremony.
+Natural provider-session expiry does not invalidate an explicitly consented
+offline grant. Explicit provider-session revocation does.
 
 ---
 
@@ -1169,7 +1170,10 @@ This ensures role/permission changes propagate without waiting for the long refr
 
 `POST /revoke` supports refresh-token revocation.
 
-Revoking a refresh token SHOULD revoke its family.
+Revoking a refresh token revokes its family. Authenticate and recheck the
+requesting client before altering family state. An unknown token or one not owned
+by that client returns the nondisclosing success response; a database failure
+returns 503, never a false successful revocation.
 
 JWT access tokens are intentionally short-lived and are not required to participate in a global online introspection database.
 
@@ -1181,7 +1185,10 @@ refresh family   -> immediate inability to mint new access tokens
 access token     -> remains valid until its short expiry
 ```
 
-With the default TTL, maximum residual access authorization is approximately five minutes.
+With the default TTL, residual validity of already-issued authd access tokens is
+approximately five minutes, plus RP clock tolerance. This is NOT a maximum on an
+RP's independent application-cookie lifetime; RPs must define their own session
+expiry/revalidation policy until a separately implemented logout channel exists.
 
 This is intentional.
 
@@ -1189,22 +1196,18 @@ This is intentional.
 
 # 21. UserInfo
 
-`/userinfo` accepts a bearer access token and returns identity claims according to the originally granted scopes.
+Accept GET or POST with a Bearer access token; POST may instead use one
+form-encoded `access_token`. Do not accept URL-query tokens or multiple credential
+transports. Require a valid issuer-signed `at+jwt` access token with `openid` and
+valid client/audience binding; an ID token is not a UserInfo credential.
 
-Example:
-
-```json
-{
-  "sub": "404c7592-4ae3-4498-b815-2fd3b1dca1bf",
-  "preferred_username": "alice",
-  "name": "Alice Example",
-  "email": "alice@example.com",
-  "email_verified": true,
-  "groups": ["bdcmaps-admin"]
-}
-```
-
-A token without the corresponding identity scope does not receive that claim.
+Verify its signature once. Project the identity snapshot and applicable
+per-destination selectors carried in the signed access token. Only corresponding
+scoped/selected fields are returned. The `sub` agrees with the associated ID
+token. Empty requested role/group memberships encode as arrays, not null.
+Invalid tokens return 401, insufficient identity scope 403, malformed credential
+transport 400, and dependency failure 503. This endpoint does not extend a token's
+expiry or convert an old grant into newly elevated permissions.
 
 ---
 
@@ -1253,30 +1256,40 @@ idle timeout:       12 hours
 absolute lifetime:   7 days
 ```
 
-No permanent remember-me cookie exists in v1.
+No permanent remember-me cookie exists in v1. Read session/user authority live.
+Throttle only the activity write: at most once per min(60 seconds, idle TTL/4),
+with a one-millisecond floor. This reduces write churn; idle expiry is approximate
+within that touch interval, not a promise of an exact wall-clock sliding timer.
+
+A successful fresh login atomically creates a new provider session, consumes its
+factor proof, and retires the presented prior session and its unused codes.
+Ordinary reauthentication does not erase previously consented offline families.
+Explicit session revocation/logout revokes that session's unused codes and
+refresh families in the same mutation transaction. Password changes, disabling,
+and MFA reset retain their stronger user-wide revocation semantics.
 
 ---
 
 # 23. Logout
 
-The provider supports RP-Initiated Logout.
+Support GET and POST RP-Initiated Logout, with a signed ID-token hint and an
+exactly registered post-logout URI. Preserve `state` on the validated redirect.
+Otherwise-valid expired ID-token hints can identify the current/recent session;
+access tokens cannot be substituted as hints.
 
-Example:
+Automatic logout requires the hint to match the current subject and provider
+`sid` (when present). Bare, cross-subject, or cross-session requests ask the user
+for explicit confirmation instead of silently terminating the session. The POST
+confirmation is CSRF-bound to the exact logout parameters and current browser
+session. A valid signed hint may still authorize a registered redirect after the
+provider session has already gone. Invalid destinations are rejected before any
+logout mutation.
 
-```text
-GET /logout?
-    id_token_hint=...&
-    post_logout_redirect_uri=https%3A%2F%2Fapp.example%2F&
-    state=...
-```
-
-Post-logout redirect URI uses exact registered matching.
-
-Automatic RP-initiated logout requires a cryptographically valid `id_token_hint` identifying the same subject as the current provider session. A bare or cross-subject request MUST NOT destroy the current provider session. An otherwise-valid ID Token hint MAY remain usable after its `exp` time for a current/recent provider session, consistent with RP-Initiated Logout guidance.
-
-When the provider session is already absent, a valid hint may still authorize idempotent redirection to that client's exactly registered post-logout URI. A request without trustworthy client/session context MUST NOT redirect to arbitrary destinations.
-
-Front-channel and back-channel RP logout propagation are deferred. The emitted `sid` claim is intentionally retained now so RPs can correlate local sessions without changing their local session schema when back-channel logout is later justified. A future back-channel implementation MUST target the RP session identified by `sid`, not every session belonging to the same subject.
+Successful local logout commits provider-session and related grant revocation
+before clearing cookies or redirecting. A dependency failure leaves the browser
+cookie intact and returns 503, rather than claiming logout succeeded. No automatic
+front/back-channel logout notification to an RP is implemented or advertised;
+existing RP-local sessions are not magically destroyed.
 
 ---
 
@@ -2103,7 +2116,7 @@ The following are release-blocking.
 13. An unprivileged user cannot perform any `system.admin` operation.
 14. Client-supplied parameters cannot create an open redirect.
 15. OIDC `sub` does not change when username/email changes.
-16. `groups` and `roles` claims contain only current local role names and cannot be injected by client input.
+16. `groups` and `roles` contain local role names current at issuance/refresh, never client-injected names; an already-issued token remains a short-lived snapshot.
 17. `groups` or `roles` is emitted only when its scope was both requested and allowed for the client.
 18. A zero-role enabled user may authenticate for identity-only use, but receives no application permissions and no administrative access.
 19. The canonical primary password is never stored reversibly and has no NT-hash/password-equivalent companion by default.
@@ -2115,8 +2128,15 @@ The following are release-blocking.
 25. Authd authentication alone never creates application-local tenant, organization, customer, PBX, extension, project, room, case, boundary, workspace, or resource membership.
 26. An ID Token's `acr` reflects the authentication context actually satisfied; client input cannot inject or upgrade it.
 27. `sid` identifies the provider login session and survives token refresh for that session; a fresh provider login receives a different `sid`.
-28. A client requiring MFA or an RP requesting MFA cannot receive a password-context ID Token when the requirement is unmet.
+28. Client-required MFA and essential MFA selectors cannot receive a password-context ID Token; voluntary `acr_values` is not an essential requirement.
 29. Applications may trust other IdPs directly; authd does not require identity brokering through authd.
+30. Grant signing, code/refresh consumption, replacement/family creation and audit share one commit boundary.
+31. Another client or wrong PKCE verifier cannot revoke the legitimate grant by replay probing.
+32. Unknown infrastructure state is not invalid credentials or successful revocation; failures remain explicit.
+33. Authorization continuation and consent are bound to the initiating browser, and consent to the current provider session.
+34. Voluntary claims never become mandatory authority; normal nonmatching claim values are omitted, not manufactured.
+35. A token for one purpose cannot be accepted for another simply because its JWT signature is valid.
+36. Security-critical mutation paths exclude grant commit; read-only paths do not serialize unrelated grants.
 
 ---
 
@@ -2141,7 +2161,7 @@ login_hint
 PKCE
 ID token validation
 nonce
-acr_values password and MFA requests
+voluntary acr_values and essential claims password/MFA requests
 max_age combined with MFA step-up
 unmet_authentication_requirements
 acr/amr claims
@@ -2201,7 +2221,7 @@ An application can:
 5. Validate an RS256 ID token from JWKS.
 6. Receive short-lived access token scopes.
 7. Receive groups/roles claims when requested.
-8. Request password or MFA authentication context with `acr_values`.
+8. Express ACR preferences through `acr_values`, mandatory context through essential `claims`, and validate the returned authentication context.
 9. Retain `(iss, sub, sid)` with its local application session.
 10. Refresh using rotating refresh tokens without losing `acr`/`sid` correlation.
 11. Use /userinfo when needed.
@@ -2245,63 +2265,48 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.8.4 implementation limits and evidence
+# 45. v0.9.0 implementation limits and evidence
 
-This revision implements the identity/bootstrap/session/MFA/admin source slice and
-the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
-S256, durable browser continuations, one-use authorization codes, RS256 ID/access
-tokens, UserInfo, rotating refresh families with replay revocation, token
-revocation, RP-initiated logout, administrator-managed OIDC clients, `acr_values` step-up enforcement, `acr`/`amr` ID-token context, and stable provider-session `sid` correlation across refresh.
+The source implements local identity/bootstrap/MFA/administration and the limited
+code-flow OIDC profile described above. No OpenID certification, production
+signoff, external RP acceptance, or measured PostgreSQL throughput is claimed.
+The prior tester's OpenBSD/real-PostgreSQL pass belongs to the earlier revision,
+not this refactored transaction implementation.
 
-This implementation status is not a conformance or production claim. The authoring
-environment has not executed the real pgx/Argon2 build against PostgreSQL and has
-not run the actual private bdcmaps application or an independent OIDC test suite.
+Security-changing identity/client/key operations use an exclusive transaction
+advisory gate. Unrelated grant transactions share that gate and lock their own
+request/code/family rows, allowing concurrent grants while excluding privilege
+changes through the issuance commit. All application writers must obey that
+contract. Direct DBA changes are outside it. Read-only admin views use a
+consistent read transaction without taking the global writer gate.
 
-The local identity implementation uses `database/sql` with the actual pgx driver
-registered by the executable; the dependency policy is unchanged. The direct
-Argon2 implementation is in `internal/password`; session/control-plane packages
-do not import the driver or KDF. These boundaries make the real pure components
-testable without substituting fake dependency modules.
+Cleanup works in bounded 256-row batches with a two-second pass budget and short
+lock wait. Expired family children are batched before parent removal. Consumed
+code/token witnesses remain while a related offline family can be used. Retired
+public signing keys are never automatically deleted. Reverse-FK and expiry
+indexes support these operations; actual query plans, storage growth and latency
+still require deployment-scale PostgreSQL measurements.
 
-Initial safety bounds: four concurrent KDF operations; verifier memory 8–256 MiB,
-iterations 1–10, parallelism 1–8, salt/key 16–64 bytes; encoded record at most 512
-bytes; submitted password at least 12 Unicode characters and at most 1024 bytes.
-Malformed verifier parameters fail before expensive derivation. Process-local
-rate buckets and caller-controlled keys are bounded; this is not distributed
-rate limiting. Deployments must budget for up to four allowed verifier workloads.
+The initial admin catalog retains a 200-record fail-closed editing ceiling;
+pagination is unfinished. Other deliberate limits include four concurrent KDF
+operations, bounded process-local rate buckets, 64 scopes, 32 registered redirect
+URIs per client, 8 KiB claims JSON, 16 KiB JWTs, and bounded key caches. No distributed
+rate limiter, multi-instance production qualification, or arbitrary client/audience
+resource-server registry is implied.
 
-Provider mutations serialize on one short transaction-scoped advisory lock.
-Credential derivation occurs outside that lock; verified snapshots are compared
-again after acquiring it. This is intentionally a simple single-service design.
-The application requires live PostgreSQL for authentication and current grants;
-it does not fall back to cached allows after a database failure.
+Migration 005 preserves users, credentials, keys, existing sessions and established
+refresh families; it restarts pending browser authorizations and unused codes
+which lack the new browser binding. An existing permission whose name shadows an
+OIDC control scope makes the migration fail atomically until explicitly renamed
+or removed. The original migrations remain unchanged. Normal startup checks exact
+recorded migration names/versions; the migrator permits only a valid manifest
+prefix. This is not a checksum or physical-DDL integrity attestation.
 
-The initial admin editor has an explicit 200-record catalog ceiling and fails
-closed instead of rendering an incomplete assignment list. v0.7 implements user,
-non-built-in-role, unreferenced-permission, and OIDC-client deletion; permission
-editing; administrative MFA reset; recent-MFA recovery-code regeneration; signing-key
-inventory/rotation; periodic expiry/audit cleanup; and row-version-based optimistic
-concurrency for user, role, permission, and OIDC-client edits. Stale concurrent saves
-fail closed with a conflict rather than silently overwriting a newer administrator
-change. User deletion is soft at the identity row but removes local credentials, MFA
-material, role grants, provider sessions, outstanding authorization codes, and refresh
-capability. OIDC-client deletion atomically removes its durable grant state;
-already-issued short-lived JWTs expire normally. Automatic cleanup intentionally never
-deletes signing keys.
+The native OpenBSD/Linux install contract remains repeatable and preserves the
+deployment's env, master key, pgpass and database. DDL is explicit with the owner
+credential, never the runtime daemon credential. Backup/restore, master-key
+rotation, native service-manager operation and full dependency/SQL/conformance
+tests remain required deployment gates. See `VALIDATION.md` for exactly which
+checks ran, and `docs/OIDC_AUDIT.md` for before/after findings and measurements.
 
-Pagination, an explicit signing-key deletion/retention schedule, safe break-glass
-recovery, backup/master-key rotation qualification, native OpenBSD/Linux service
-qualification, and further operation-specific audit detail remain TODO items. Trusted-proxy source-IP
-resolution is implemented through an explicit CIDR allow-list; rate limiting remains
-process-local and therefore single-instance. Normal daemon/bootstrap startup performs
-no DDL and verifies the exact embedded migration manifest; `authd migrate` is the
-explicit schema-owner path. The native installer supports OpenBSD rc.d and
-Linux systemd from one shared runtime-file contract. First install creates missing env/master-key state; ordinary installer reruns preserve env/master-key/pgpass/database state while refreshing the binary, examples, documentation, and service definition. Schema migration remains an explicit owner-credential step. Internal HTTP failures expose a request reference and log
-only a bounded error class rather than the raw underlying driver error.
-Only implemented local-provider sessions are revoked by local logout. Existing
-relying-party application sessions are outside that operation.
-
-Validation is recorded in VALIDATION.md. Unit fixtures do not prove PostgreSQL
-transactions, and typechecking the SQL-test body is not a real database test.
-The production dependency-backed build and real database gate are mandatory
-before deployment; offline checks cannot substitute for them.
+---

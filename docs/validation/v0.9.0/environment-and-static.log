@@ -1,0 +1,14 @@
+Environment
+go version go1.23.2 linux/amd64
+Linux 6.18.44 x86_64
+Full production-module test attempt (must fail in this environment)
+go: go.mod requires go >= 1.26.0 (running go 1.23.2; GOTOOLCHAIN=local)
+exit=1
+Missing database gate (must fail, not skip)
+AUTHD_TEST_DISPOSABLE=1 required
+make: *** [Makefile:78: integration] Error 1
+exit=2
+Deploy/static checks
+Static checks passed; systemd unit syntax only, not a live service.
+Migrations 001–004 unchanged byte-for-byte.
+Named top-level tests in real stdlib packages: 102 plus 2 standalone PHC parser tests.

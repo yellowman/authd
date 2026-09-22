@@ -58,3 +58,16 @@ type InputError struct{ Message string }
 
 func (e *InputError) Error() string { return e.Message }
 func Invalid(message string) error  { return &InputError{Message: message} }
+
+// Protocol control scopes cannot also be application permissions: identity-only
+// login would otherwise appear to confer an application capability of that name.
+func ValidatePermissionName(name, description string) error {
+	if err := ValidateName(name, description); err != nil {
+		return err
+	}
+	switch name {
+	case "openid", "profile", "email", "groups", "roles", "offline_access":
+		return Invalid("permission name is reserved for an OIDC identity/control scope")
+	}
+	return nil
+}

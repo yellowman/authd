@@ -79,34 +79,65 @@ closest to this mode.
 
 ## Authentication context and step-up
 
-Supported ACR values:
+Authd advertises `urn:authd:acr:pwd` and `urn:authd:acr:mfa`. The latter is
+password plus TOTP/recovery, not phishing-resistant authentication.
 
-```text
-urn:authd:acr:pwd
-urn:authd:acr:mfa
-```
-
-An RP can require fresh MFA for a sensitive operation without requiring MFA for
-every ordinary application visit:
-
-```text
-/authorize?...&
-  acr_values=urn:authd:acr:mfa&
-  max_age=300
-```
-
-The ID Token reports what authd actually satisfied:
+`acr_values` is a voluntary preference. Do not treat a successful response to
+`acr_values=urn:authd:acr:mfa` as proof that MFA occurred. This corrects the v0.8
+integration guidance. Use a client-wide `require_mfa=true` policy or the standard
+essential claim request for a mandatory per-operation requirement:
 
 ```json
-{
-  "auth_time": 1780000000,
-  "acr": "urn:authd:acr:mfa",
-  "amr": ["pwd", "otp"]
-}
+{"id_token":{"acr":{"essential":true,"value":"urn:authd:acr:mfa"}}}
 ```
 
-If authd cannot meet the authentication requirement, it returns
-`unmet_authentication_requirements`; it does not downgrade the token silently.
+Send this JSON URL-encoded as `claims`, along with `max_age=300` for a five-minute
+freshness requirement. Retain the original state, nonce, PKCE verifier, desired
+identity and requested operation in the RP's server-side flow. Validate signature,
+issuer, audience, nonce, expiry, returned `acr`, and `auth_time` before completing
+that operation. Reject an unexpected subject or weaker context. A successful
+refresh preserves the original authentication time; it cannot serve as step-up.
+
+Essential context that cannot be achieved returns
+`unmet_authentication_requirements`. With `prompt=none`, interaction-required
+cases return `login_required`; do not convert an IdP outage into permanent
+credential rejection or an automatic loop of login redirects.
+
+## Protocol and claim transport
+
+Use Authorization Code with S256 PKCE for confidential and public clients. The
+provider accepts GET or form-encoded POST authorization, and query responses.
+Do not send Request Objects, `request_uri`, or unsupported `form_post` response
+mode. Configure exact callback/logout URIs; wildcard callbacks are not supported.
+Basic or body client authentication is supported, never both in one request.
+
+ID tokens use `typ=JWT` and are for the RP login; access tokens use `typ=at+jwt`
+and must not substitute for an ID token. UserInfo requires an access token with
+`openid`. `at_hash` is included in ID tokens. An RP accessing its own API must
+validate the API token's audience/purpose rather than accept any signed JWT.
+
+The normal `profile`/`email` scopes request their supported bundles. A supported
+`claims` selector can request an individual field for ID-token or UserInfo output
+without requesting the whole bundle. Missing profile fields, including unavailable
+essential profile fields, are omitted; do not assume every account has email.
+Neither `groups` nor `roles` is a standardized organizational membership model;
+here both are gated views of the same local roles. Application permissions remain
+requested OAuth scopes, never a claim supplied by the browser.
+
+## Offline access and refresh serialization
+
+Request `openid offline_access` **and `prompt=consent`**, and configure that client
+to permit refresh tokens. The user must approve the browser-bound consent page.
+Without explicit consent, authd drops `offline_access` and issues no refresh
+credential. Inspect the actual response scopes and refresh-token presence.
+
+Keep refresh tokens server-side or in an appropriately protected client store.
+Serialize refresh per local RP session, including concurrent tabs/requests; adopt
+the replacement token atomically. Do not retry a known consumed token. A lost
+response or ambiguous COMMIT failure may require reauthorization: the provider
+cannot make database commit and HTTP response delivery atomic, and deliberately
+has no replay-acceptance grace window. True dependency failures return 503, not
+`invalid_grant`; genuine reuse revokes the family.
 
 ## Session correlation
 
@@ -120,7 +151,10 @@ oidc_sid
 ```
 
 `sid` remains the same for tokens refreshed from that provider session. A new
-provider login gets a new `sid`. Back-channel logout is not implemented in v1,
+provider login gets a new `sid`. Ordinary reauthentication retires the old browser
+session without erasing previously consented offline grants. Natural session
+expiry also permits those grants to survive; explicit provider-session logout or
+revocation stops their future refresh. Back-channel logout is not implemented,
 but retaining `sid` now makes later targeted logout possible without changing
 RP session schemas.
 
@@ -146,3 +180,18 @@ explicit authd product requirement.
 Authd therefore does not add upstream OIDC federation, SAML brokering,
 organizations, tenants, realms or generic scoped grants merely to make every RP
 see one issuer.
+
+## RP-local session lifetime is a separate decision
+
+An authd access-token TTL is not a kill switch for an application's longer-lived
+cookie. Until an independently qualified logout/revalidation mechanism exists,
+choose and document a local maximum lifetime, freshness checks for sensitive
+operations, and how disable/revocation takes effect. Store `(issuer, sub, sid)`
+for correlation, but never accept `sid` itself as a bearer credential. Preserve
+local domain authorization checks on HTTP, WebSocket, background and export paths.
+
+## Standards
+
+See OpenID Connect Core 1.0 errata 2 §§3.1, 5.5, 11 and 12; RFC 7636;
+RFC 9700; and RP-Initiated Logout 1.0. The executable audit and residual
+qualification list are in `OIDC_AUDIT.md` and `../VALIDATION.md`.

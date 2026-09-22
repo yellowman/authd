@@ -35,7 +35,7 @@ INSTALL_OS?=
 	install-config install-service enable start restart status stop help
 
 deps:
-	${GO} mod tidy
+	${GO} mod download
 	${GO} mod verify
 
 fmt:
@@ -51,17 +51,17 @@ env-check:
 		echo "deploy/systemd/authd.env.example is out of sync with .env.example" >&2; exit 1; }
 
 test:
-	${GO} test ./...
+	${GO} test -mod=readonly -count=1 ./...
 
 race:
-	${GO} test -race ./...
+	${GO} test -mod=readonly -race -count=1 ./...
 
 vet:
-	${GO} vet ./...
+	${GO} vet -mod=readonly ./...
 
 build:
 	mkdir -p "${BUILD_DIR}"
-	${GO} build ${GOFLAGS} ${GO_BUILD_FLAGS} -o "${BINARY}" ./cmd/authd
+	${GO} build -mod=readonly ${GOFLAGS} ${GO_BUILD_FLAGS} -o "${BINARY}" ./cmd/authd
 
 # Requires real dependencies and a marked disposable PostgreSQL database.
 # Missing prerequisites are failures, not successful skipped checks.
@@ -77,12 +77,12 @@ verify-linux: fmt-check env-check test race vet build integration linux-deploy-c
 integration:
 	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
 	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
-	${GO} test -race -count=1 -tags=integration ./internal/db
+	${GO} test -mod=readonly -race -count=1 -tags=integration ./internal/db
 
 integration-openbsd:
 	@test "$$AUTHD_TEST_DISPOSABLE" = "1" || { echo "AUTHD_TEST_DISPOSABLE=1 required" >&2; exit 1; }
 	@test -n "$$AUTHD_TEST_DATABASE_URL" || { echo "AUTHD_TEST_DATABASE_URL required" >&2; exit 1; }
-	${GO} test -count=1 -tags=integration ./internal/db
+	${GO} test -mod=readonly -count=1 -tags=integration ./internal/db
 
 openbsd-deploy-check:
 	@ksh -n deploy/openbsd/rc.d/authd

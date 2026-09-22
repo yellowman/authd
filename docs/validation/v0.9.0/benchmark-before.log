@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: github.com/yellowman/authd/internal/oidc
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkTokenEncoding-5   	     187	   6581544 ns/op	  108622 B/op	     334 allocs/op
+BenchmarkTokenEncoding-5   	     190	   6464274 ns/op	  108613 B/op	     334 allocs/op
+BenchmarkTokenEncoding-5   	     193	   6594446 ns/op	  108624 B/op	     334 allocs/op
+BenchmarkUserInfoHTTP-5    	    3244	    374497 ns/op	   99055 B/op	     326 allocs/op
+BenchmarkUserInfoHTTP-5    	    2714	    368474 ns/op	   99056 B/op	     326 allocs/op
+BenchmarkUserInfoHTTP-5    	    3375	    359176 ns/op	   99050 B/op	     326 allocs/op
+PASS
+ok  	github.com/yellowman/authd/internal/oidc	21.265s

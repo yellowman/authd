@@ -393,7 +393,7 @@ func resolvedClientIP(r *http.Request, trusted []netip.Prefix) string {
 func (s *Server) clientAddress(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := resolvedClientIP(r, s.cfg.TrustedProxies)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientIPContextKey{}, ip)))
+		next.ServeHTTP(w, r.WithContext(requestid.WithClientIP(context.WithValue(r.Context(), clientIPContextKey{}, ip), ip)))
 	})
 }
 func (s *Server) securityHeaders(next http.Handler) http.Handler {

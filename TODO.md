@@ -1,4 +1,4 @@
-# Implementation sequence — v0.8.4
+# Implementation sequence — v0.9.0
 
 Checked items mean implemented source with the local evidence in `VALIDATION.md`,
 not production qualification. Real PostgreSQL/dependency-backed execution and an
@@ -25,8 +25,8 @@ actual bdcmaps login remain the first external gates.
 - [x] Signing-key rotation overlap; retired private material is discarded.
 - [x] Client repository and exact redirect/post-logout URI validation.
 - [x] Server-side authorization continuation storage and parallel-login-safe handles.
-- [x] `prompt=none/login`, `max_age`, `login_hint`, nonce, state, and `iss` response.
-- [x] `acr_values` password/MFA context selection, client MFA minimums, and `unmet_authentication_requirements`.
+- [x] GET/POST authorization; browser-bound continuation/consent; `none/login/consent/select_account`, completion-time `max_age`, login hints, nonce/state/issuer.
+- [x] Voluntary `acr_values`, essential ACR/sub selectors, selective profile claims and client MFA floors.
 - [x] ID-token `acr`/`amr` plus stable provider-session `sid` retained across refresh.
 - [x] RP integration contract for `(iss, sub)` linking and application-local authority boundaries.
 - [x] Permission-scope evaluation and requested+allowed groups/roles projection.
@@ -41,12 +41,25 @@ actual bdcmaps login remain the first external gates.
 - [ ] Run `docs/BDCMAPS_INTEGRATION.md` against the actual private bdcmaps app.
 - [ ] Run an independent OIDC/OAuth interoperability/conformance suite.
 
+## v0.9.0 audit corrections
+
+- [x] Single transaction for code/refresh validation, signing, credential updates and audit.
+- [x] Shared grant gate plus per-code/family row locks; exclusive authority changes.
+- [x] Code replay revokes descendants; wrong-client probes cannot revoke another grant.
+- [x] Revocation and token infrastructure failures remain 503 rather than false success/invalid credentials.
+- [x] Strict JWT/JSON parsing, distinct ID/access token types, `at_hash`, one UserInfo verification.
+- [x] Scoped claim selection/value constraints and actual consent for offline access.
+- [x] Live-session code redemption; atomic login replacement and explicit logout grant revocation.
+- [x] Bounded crypto caches, origin lookup without catalog truncation, throttled session touches, batched cleanup and reverse indexes.
+- [x] Exact-prefix migration validation and reserved-scope constraints.
+- [ ] Independent full OIDC conformance runner, real bdcmaps callback, SQL lock/query plan/load qualification.
+
 ## Qualification
 
 - [x] Real-PostgreSQL integration test source and non-skipping gate definition.
 - [x] OIDC SQL lifecycle integration source added to that gate.
-- [x] Run the integration suite against PostgreSQL with the actual pgx driver.
-- [x] Resolve real pinned modules, review/commit `go.sum`, run full tests/build/vet on OpenBSD/amd64.
+- [ ] Run the NEW v0.9.0 migration/atomicity/concurrency integration suite against PostgreSQL with the actual pgx driver (earlier revision was externally tested).
+- [ ] Rerun the v0.9.0 full build/tests/vet with the pinned modules on OpenBSD/amd64 or Linux (earlier external lock state is retained).
 - [ ] Full browser automation against the actual daemon and database (live setup/login forms were exercised manually).
 - [ ] Full race-detector suite on a supported Go platform (OpenBSD/amd64 does not support `-race`).
 

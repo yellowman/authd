@@ -72,6 +72,29 @@ func Migrate(ctx context.Context, pool *sql.DB) error {
  version bigint PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
+	// Reject a hole, renamed entry, or newer history BEFORE attempting any
+	// pending DDL. Migrate is not a repair tool for an unrecognized schema.
+	rows, err := tx.QueryContext(ctx, `SELECT version,name FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		return err
+	}
+	actual := []migrationEntry{}
+	for rows.Next() {
+		var entry migrationEntry
+		if err = rows.Scan(&entry.Version, &entry.Name); err != nil {
+			rows.Close()
+			return err
+		}
+		actual = append(actual, entry)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if !migrationPrefix(actual, manifest) {
+		return ErrSchemaOutdated
+	}
 	for _, migration := range manifest {
 		var name string
 		err = tx.QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=$1`, migration.Version).Scan(&name)
@@ -147,4 +170,18 @@ func migrationVersion(name string) (int64, error) {
 		return 0, fmt.Errorf("invalid migration version: %q", name)
 	}
 	return version, nil
+}
+
+// A valid installed history is exactly a prefix of the embedded manifest.
+// This checks recorded names/versions, not physical DDL tampering or file hashes.
+func migrationPrefix(actual, manifest []migrationEntry) bool {
+	if len(actual) > len(manifest) {
+		return false
+	}
+	for i := range actual {
+		if actual[i] != manifest[i] {
+			return false
+		}
+	}
+	return true
 }

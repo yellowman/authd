@@ -83,13 +83,41 @@ func TestMigrationManifestIsOrderedAndUnique(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []migrationEntry{{Version: 1, Name: "001_init.sql"}, {Version: 2, Name: "002_identity_lifecycle.sql"}, {Version: 3, Name: "003_oidc_authorization.sql"}, {Version: 4, Name: "004_oidc_rp_contract.sql"}}
-	if len(manifest) != len(want) {
-		t.Fatalf("migration count %d, want %d", len(manifest), len(want))
+	if len(manifest) == 0 {
+		t.Fatal("empty migration manifest")
 	}
-	for i := range want {
-		if manifest[i] != want[i] {
-			t.Fatalf("migration %d = %#v, want %#v", i, manifest[i], want[i])
+	for i, m := range manifest {
+		if m.Version != int64(i+1) || m.Name == "" {
+			t.Fatalf("unordered manifest: %#v", manifest)
+		}
+	}
+}
+
+func TestAtomicGrantMigrationInvalidatesOnlyPendingFlows(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/005_oidc_atomic_grants.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"browser_hash", "refresh_family_id", "max_age_seconds", "refresh_families_session_idx", "DELETE FROM authorization_requests"} {
+		if !strings.Contains(string(body), marker) {
+			t.Fatalf("missing atomic-grant migration rule %q", marker)
+		}
+	}
+	if strings.Contains(string(body), "DELETE FROM users") || strings.Contains(string(body), "DELETE FROM signing_keys") {
+		t.Fatal("upgrade destroyed durable identities or keys")
+	}
+}
+
+func TestMigrationPrefixRejectsHolesAndFutureHistory(t *testing.T) {
+	m := []migrationEntry{{1, "001.sql"}, {2, "002.sql"}, {3, "003.sql"}}
+	for _, actual := range [][]migrationEntry{nil, m[:1], m[:2], m} {
+		if !migrationPrefix(actual, m) {
+			t.Fatalf("valid prefix rejected: %v", actual)
+		}
+	}
+	for _, actual := range [][]migrationEntry{{m[1]}, {m[0], m[2]}, {{1, "renamed.sql"}}, append(append([]migrationEntry{}, m...), migrationEntry{4, "future.sql"})} {
+		if migrationPrefix(actual, m) {
+			t.Fatalf("invalid history accepted: %v", actual)
 		}
 	}
 }

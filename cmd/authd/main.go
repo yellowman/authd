@@ -99,13 +99,13 @@ func run() error {
 		stats, cleanupErr := db.CleanupExpired(cleanupCtx, pool, time.Now().UTC(), cfg.AuditRetention)
 		if cleanupErr != nil {
 			if !errors.Is(cleanupErr, context.Canceled) {
-				slog.Warn("expired-state cleanup failed", "error", cleanupErr)
+				slog.Warn("expired-state cleanup failed", "class", "dependency_unavailable")
 			}
 			return
 		}
-		total := stats.AuthorizationRequests + stats.AuthorizationCodes + stats.Sessions + stats.PendingTOTP + stats.BootstrapTokens + stats.RefreshFamilies + stats.AuditEvents
-		if total != 0 {
-			slog.Info("expired state cleaned", "rows", total)
+		total := stats.AuthorizationRequests + stats.AuthorizationCodes + stats.Sessions + stats.PendingTOTP + stats.BootstrapTokens + stats.RefreshTokens + stats.RefreshFamilies + stats.AuditEvents
+		if total != 0 || stats.More {
+			slog.Info("expired state cleaned", "rows", total, "more", stats.More)
 		}
 	}
 	cleanup()

@@ -134,23 +134,28 @@ A new dependency needs a specific reason. Preference order:
 The starter uses only pgx and x/crypto.
 
 
-## v0.5 commit boundaries
+## v0.9.0 transaction and concurrency boundaries
 
-A short transaction-scoped advisory lock serializes identity mutations. Session
-and admin guards are re-evaluated in that transaction. Password hashing occurs
-outside it; the stored verifier and MFA seed are rechecked before minting a
-session. OTP/recovery consumption, session creation, and audit either all commit
-or all roll back. Password/MFA changes and disable use the same lock and revoke
-sessions and refresh families before commit. Live session reads re-resolve roles
-and permissions; no long-lived cached administrator grant is used.
+Identity/client/signing-key mutations use an exclusive PostgreSQL transaction
+advisory gate. Authorization issuance and token redemption take its shared form,
+then lock their own request/code/family rows. Unrelated grants can proceed in
+parallel, while privilege changes cannot commit between validation and issuance.
 
-Bootstrap is an explicit one-time local command plus web form, closed by permanent
-installation state. OIDC issuance now uses durable server-side authorization
-continuations, one-use codes, PKCE S256, encrypted RSA signing keys, short-lived
-JWT access/ID tokens, and rotating opaque refresh families. Protocol state is
-kept in the OIDC store; identity/session authority stays in the identity core.
-The internal Store contracts are not public SDKs or multi-backend abstractions.
+`OIDCStore.RedeemCode` and `RedeemRefresh` own complete grant transactions.
+The injected `TokenIssuer` callback receives the current grant and active key;
+it only constructs/signs the response. It performs no database I/O, external I/O
+or KDF. Signing failure, audit failure and database failure before commit roll
+back credential consumption. Only a successful commit releases the response.
+Replay outcomes deliberately commit family revocation while returning an error.
 
+Read-only administration uses a repeatable read transaction rather than the
+writer gate. Session checks reload authority but throttle last-seen writes.
+Bounded parsed-key caches save cryptographic decoding, never stale permissions.
+Maintenance is budgeted and releases the writer gate between small batches.
+
+The callback/store interfaces are internal implementation boundaries, not public
+SDKs or support for interchangeable production databases. The only backend is
+PostgreSQL; existing local identity, domain and adapter ownership stays intact.
 
 ## Relying-party boundary
 

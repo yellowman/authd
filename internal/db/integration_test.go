@@ -535,3 +535,12 @@ func TestPostgresSelfProfileEditRequiresFreshSession(t *testing.T) {
 		t.Fatalf("stale session edited profile: %v", err)
 	}
 }
+
+func TestPostgresMigrateRejectsAheadHistory(t *testing.T) {
+	s, ctx := postgres(t)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version,name) VALUES(999,'999_newer_release.sql')`)
+	require(t, err)
+	if err = db.Migrate(ctx, s.DB); !errors.Is(err, db.ErrSchemaOutdated) {
+		t.Fatalf("migrator accepted newer history: %v", err)
+	}
+}

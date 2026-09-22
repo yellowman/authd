@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,8 +37,17 @@ func normalizeUnique(values []string, maxItems int) ([]string, error) {
 	return out, nil
 }
 func validClientURI(raw string) bool {
+	if strings.ContainsAny(raw, "#*\\") || strings.IndexFunc(raw, func(r rune) bool { return r <= 32 || r == 127 }) >= 0 {
+		return false
+	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Fragment != "" {
+	if err == nil && u.Port() != "" {
+		port, e := strconv.Atoi(u.Port())
+		if e != nil || port < 1 || port > 65535 || strconv.Itoa(port) != u.Port() {
+			return false
+		}
+	}
+	if err != nil || u.Scheme == "" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
 		return false
 	}
 	if u.Scheme == "https" {

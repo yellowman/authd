@@ -7,68 +7,36 @@ applications consume the same identity. The first relying-party target is
 
 Relying-party identity linking, application-local authority, ACR step-up, and `sid` session correlation are defined in [`docs/RP_INTEGRATION.md`](docs/RP_INTEGRATION.md).
 
-## v0.8.4 — repeatable native install and upgrade baseline
+## v0.9.0 — OIDC protocol and grant-transaction audit
 
-v0.8.4 keeps the v0.8.3 OpenBSD/Linux service layout but corrects the installer contract: greenfield describes the current installed-base state, not a permanent restriction. First install creates missing env/master-key state; later installs replace binary/service/docs/examples while preserving active env, pgpass, master key, and PostgreSQL data. Migrations remain explicit under `authd_owner`. The v0.8.1 external run completed bootstrap, web login, client registration, Authorization Code + PKCE, `client_secret_post`, ID-token/UserInfo, and refresh rotation against PostgreSQL. Native OpenBSD/Linux install and service-manager qualification remain external gates; see `VALIDATION.md`.
+This release fixes the authorization and token lifecycle, rather than merely
+adding metadata or changing UI labels. Read [`docs/OIDC_AUDIT.md`](docs/OIDC_AUDIT.md)
+for reproduced findings, implementation locations, regressions and performance
+measurements. See [`VALIDATION.md`](VALIDATION.md) for the exact execution boundary.
 
-Implemented in this revision:
+Key changes: browser-bound GET/POST authorization and consent; standards-correct
+ACR preferences versus essential requirements; selective normal claims;
+transactional code redemption/signing/refresh issuance; code-replay descendant
+revocation; transactional refresh rollback; live secret/session checks; honest
+503 dependency failures; JWT type separation and strict parsing; confirmation for
+unhinted/cross-session logout; bounded key caches and database maintenance.
 
-- `DEPLOYMENT.md` now covers a common greenfield PostgreSQL/bootstrap path plus native OpenBSD `rc.d` and Linux `systemd` service installation.
-- Added `deploy/postgresql/create-database.sql` for dedicated `authd_owner` / `authd_runtime` LOGIN roles and the authd database without embedding passwords.
-- OpenBSD keeps the WaveControl-style `rc.d` env propagation; Linux now has the corresponding WaveControl-style systemd unit using the same `/etc/authd/authd.env` contract.
-- Added common native install/service targets plus `make install-openbsd` and `make install-linux`; first install creates missing env/master-key files and later installs preserve active runtime state while refreshing versioned assets.
-- `authd migrate` now requires only `DATABASE_URL`, keeping the migration-owner credential and daemon master key/issuer configuration separate.
-- Native runtime PostgreSQL credentials may use `_authd`-only `/etc/authd/pgpass` via `PGPASSFILE`, avoiding a password embedded in `DATABASE_URL` on either OpenBSD or Linux.
-- OIDC `acr_values` handling with `urn:authd:acr:pwd` and `urn:authd:acr:mfa`, client-level MFA minimums, and `unmet_authentication_requirements` when the requested context cannot be satisfied.
-- ID Tokens now emit actual `acr`/`amr` plus stable provider-session `sid`; refresh families retain the originating `sid`.
-- RP-initiated logout checks `sid` when present so one same-subject provider session cannot terminate another.
-- A binding RP integration contract requires `(iss, sub)` identity keys, forbids silent email-based linking and tenant inference, and explicitly permits customer applications such as Evident to trust other IdPs directly instead of federating them through authd.
-- `authd migrate` is now the only normal executable path that performs DDL. Daemon and bootstrap startup verify the exact embedded migration manifest and fail closed on missing, stale, ahead, or altered migration history.
-- A reviewed PostgreSQL runtime-grant script supports a DML-only daemon role without schema ownership/CREATE privileges; the greenfield SQL can create the dedicated LOGIN roles/database, while password assignment remains operator-owned.
-- Internal HTTP failures return a request reference and structured bounded error class for operator correlation without logging raw database/credential errors.
-- Soft deletion of local users with credential, MFA, role, session, authorization-code, and refresh-family teardown; the immutable identity row remains for audit/sub continuity.
-- Deletion of non-built-in roles with transactional final-administrator protection.
-- Permission editing and reference-safe deletion; `system.admin` cannot be renamed or deleted.
-- Administrative MFA reset that revokes the affected user's live provider sessions and refresh capability.
-- Self-service profile editing with email-verification clearing, plus recovery-code regeneration restricted to a recent MFA-authenticated session.
-- Destructive OIDC-client deletion with foreign-key-cascade removal of durable authorization requests, codes, scopes, redirects, secrets, and refresh families.
-- Administrator signing-key inventory and signing-key rotation UI; private-key ciphertext is never exposed by the listing.
-- Periodic bounded-state cleanup for expired authorization continuations/codes, sessions, pending TOTP enrollment, old bootstrap tokens, absolutely expired refresh families, and configurable audit retention. Signing keys are deliberately excluded from automatic cleanup.
-- New PostgreSQL integration cases for destructive lifecycle invariants, client deletion cascades, recovery regeneration/MFA reset, signing-key administration, cleanup, and fresh-session self-profile changes.
-- Explicit trusted-proxy CIDR configuration with right-to-left `X-Forwarded-For` resolution; untrusted peers and malformed chains cannot spoof audit/rate-limit source IPs.
+**Upgrade attention:** migration 005 restarts pending login transactions and
+unused authorization codes, while preserving users, secrets, sessions and offline
+families. Check for permission names colliding with reserved identity scopes
+before migration. Access tokens issued with the older `typ=JWT` are no longer
+accepted at UserInfo; reauthorize/refresh as needed. Mandatory MFA requires client
+policy or an essential `claims` selector, not `acr_values` alone. Offline access
+requires `prompt=consent`. Full procedure: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-The v0.5 provider functionality remains:
+The local stdlib-based regression/race/vet gate passes. The new SQL transaction
+and concurrency tests typecheck but **have not executed against PostgreSQL here**.
+The previous external OpenBSD/PG pass is historical evidence, not validation of
+this revision. No OpenID conformance certificate or production signoff is claimed.
 
-- OpenID Connect discovery and OAuth authorization-server metadata.
-- Encrypted persisted 3072-bit RSA signing keys, RS256 JWTs, JWKS publication,
-  signing-key rotation overlap, and destruction of retired private-key ciphertext.
-- Authorization Code flow with exact redirect matching and mandatory PKCE S256.
-- Durable server-side authorization continuations; the browser carries only an
-  opaque random handle through login, so OAuth state/nonce/challenge values do not
-  pass through login forms and parallel application logins do not share one cookie.
-- `state`, `nonce`, `login_hint`, `prompt=none`, `prompt=login`, `max_age`, and the
-  RFC 9207 `iss` authorization-response parameter.
-- One-use, client/redirect/PKCE-bound authorization codes.
-- Confidential clients using `client_secret_basic` or `client_secret_post`, plus
-  public clients using `none`; the POST form mode exists for current bdcmaps.
-- Registered-origin-only CORS for public browser clients on `/token`, `/userinfo`,
-  and `/revoke`; origins are derived from exact redirect registrations and are also
-  bound back to the specific public client on credential-bearing requests.
-- Signed access tokens and ID tokens, `/userinfo`, requested/client-allowed
-  `groups` and `roles` projection, and application permissions as OAuth scopes.
-- Opaque rotating refresh tokens, token-specific scope narrowing, current
-  user/client/permission re-evaluation, and whole-family revocation on replay.
-- RFC 7009-style refresh-token revocation and RP-initiated logout with exact
-  registered post-logout redirects.
-- Admin creation/editing of OIDC clients, exact redirect/logout URIs, allowed
-  identity/application scopes, MFA/refresh policy, access-token TTL, and one-time
-  client-secret creation/rotation.
-- Token refresh/replay/revocation audit events and server-side prevention of
-  granting the provider-only `system.admin` permission to an OAuth client.
-
-The v0.4 identity functionality also remains: one-time bootstrap, Argon2id passwords,
-local roles/permissions, provider sessions, password lifecycle, TOTP/recovery
-codes, audit, account UI, and transactionally rechecked administration.
+Local users, roles, permissions, password/TOTP/recovery, administrator CRUD,
+client registration, signing-key rotation, audit/session views, OpenBSD rc.d,
+Linux systemd and repeatable native install behavior remain part of the app.
 
 ## Dependencies and boundaries
 
@@ -183,8 +151,8 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 
 - Real PostgreSQL/dependency-backed qualification has not run in this authoring
   environment, and actual bdcmaps interoperability remains an external gate.
-- There is no user consent screen; registered applications are trusted internal
-  clients and authorization is based on their configured scope allow-list.
+- Normal online access uses registered-client policy; explicit browser-bound
+  consent is implemented and required for offline access in this release.
 - Signing-key inventory and manual rotation are implemented; automatic rotation and
   an explicit public-key deletion/retention schedule remain.
 - Pagination, TOTP QR rendering, safe break-glass recovery, backup/restore, and
@@ -198,9 +166,10 @@ the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 - OIDC conformance-suite and independent third-party client coverage remain
   qualification work; passing our protocol tests is not a conformance certificate.
 
-## Next delivery
+## Next qualification
 
-Exercise the actual `yellowman/bdcmaps` callback against authd, then qualify the
+First execute the new migration/atomicity/concurrency PostgreSQL suite. Then
+exercise the actual `yellowman/bdcmaps` callback against authd and qualify the
 production-facing OpenBSD path: HTTPS/nginx/secure cookies/trusted proxy headers,
 runtime-role separation, and live TOTP step-up. Run the race suite on a supported
 Go platform and an independent OIDC interoperability/conformance suite before a

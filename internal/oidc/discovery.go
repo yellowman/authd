@@ -3,6 +3,13 @@ package oidc
 import "strings"
 
 type Metadata struct {
+	ResponseModesSupported                 []string `json:"response_modes_supported"`
+	ClaimTypesSupported                    []string `json:"claim_types_supported"`
+	ClaimsParameterSupported               bool     `json:"claims_parameter_supported"`
+	RequestParameterSupported              bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported           bool     `json:"request_uri_parameter_supported"`
+	RevocationEndpointAuthMethodsSupported []string `json:"revocation_endpoint_auth_methods_supported"`
+
 	Issuer                                     string   `json:"issuer"`
 	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
 	TokenEndpoint                              string   `json:"token_endpoint"`
@@ -25,17 +32,20 @@ type Metadata struct {
 func NewMetadata(issuer string) Metadata {
 	issuer = strings.TrimRight(issuer, "/")
 	return Metadata{
-		Issuer:                           issuer,
-		AuthorizationEndpoint:            issuer + "/authorize",
-		TokenEndpoint:                    issuer + "/token",
-		UserinfoEndpoint:                 issuer + "/userinfo",
-		JWKSURI:                          issuer + "/jwks.json",
-		RevocationEndpoint:               issuer + "/revoke",
-		EndSessionEndpoint:               issuer + "/logout",
-		ResponseTypesSupported:           []string{"code"},
-		GrantTypesSupported:              []string{"authorization_code", "refresh_token"},
-		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"RS256"},
+		Issuer:                 issuer,
+		ResponseModesSupported: []string{"query"}, ClaimTypesSupported: []string{"normal"},
+		ClaimsParameterSupported:               true,
+		RevocationEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
+		AuthorizationEndpoint:                  issuer + "/authorize",
+		TokenEndpoint:                          issuer + "/token",
+		UserinfoEndpoint:                       issuer + "/userinfo",
+		JWKSURI:                                issuer + "/jwks.json",
+		RevocationEndpoint:                     issuer + "/revoke",
+		EndSessionEndpoint:                     issuer + "/logout",
+		ResponseTypesSupported:                 []string{"code"},
+		GrantTypesSupported:                    []string{"authorization_code", "refresh_token"},
+		SubjectTypesSupported:                  []string{"public"},
+		IDTokenSigningAlgValuesSupported:       []string{"RS256"},
 		// client_secret_post exists specifically because bdcmaps uses it today.
 		// New confidential clients should prefer client_secret_basic.
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
@@ -43,7 +53,7 @@ func NewMetadata(issuer string) Metadata {
 		ScopesSupported:                   []string{"openid", "profile", "email", "groups", "roles", "offline_access"},
 		ClaimsSupported: []string{
 			"sub", "name", "preferred_username", "email", "email_verified",
-			"groups", "roles", "auth_time", "acr", "amr", "sid",
+			"groups", "roles", "auth_time", "acr", "amr", "sid", "at_hash",
 		},
 		ACRValuesSupported:                         []string{ACRPassword, ACRMFA},
 		AuthorizationResponseISSParameterSupported: true,

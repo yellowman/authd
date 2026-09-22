@@ -2,8 +2,10 @@ package oidc
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -20,10 +22,11 @@ type HTTP struct {
 	metadata    Metadata
 	service     *Service
 	development bool
+	limiter     *identity.Limiter
 }
 
 func NewHTTP(service *Service, issuer string, development bool) *HTTP {
-	return &HTTP{metadata: NewMetadata(issuer), service: service, development: development}
+	return &HTTP{metadata: NewMetadata(issuer), service: service, development: development, limiter: identity.NewLimiter(4096)}
 }
 
 func (h *HTTP) Register(mux *http.ServeMux) {
@@ -31,6 +34,9 @@ func (h *HTTP) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.discovery)
 	mux.HandleFunc("GET /jwks.json", h.jwks)
 	mux.HandleFunc("GET /authorize", h.authorize)
+	mux.HandleFunc("POST /authorize", h.authorize)
+	mux.HandleFunc("GET /authorize/resume", h.resume)
+	mux.HandleFunc("POST /authorize/consent", h.consent)
 	mux.HandleFunc("POST /token", h.token)
 	mux.HandleFunc("GET /userinfo", h.userinfo)
 	mux.HandleFunc("POST /userinfo", h.userinfo)
@@ -42,12 +48,12 @@ func (h *HTTP) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /logout", h.logout)
 }
 
-func (h *HTTP) Pending(ctx context.Context, raw string) (clientName, loginHint string, ok bool) {
-	if h == nil || h.service == nil || !cryptoutil.ValidToken(raw) {
+func (h *HTTP) Pending(ctx context.Context, raw, browserRaw string) (clientName, loginHint string, ok bool) {
+	if h == nil || h.service == nil || !cryptoutil.ValidToken(raw) || !cryptoutil.ValidToken(browserRaw) {
 		return "", "", false
 	}
 	req, client, err := h.service.Store.AuthorizationRequest(ctx, identity.Hash(raw))
-	if err != nil || !time.Now().UTC().Before(req.ExpiresAt) {
+	if err != nil || !time.Now().UTC().Before(req.ExpiresAt) || !hmac.Equal(req.BrowserHash, identity.Hash(browserRaw)) || !client.Enabled || !contains(client.RedirectURIs, req.RedirectURI) {
 		return "", "", false
 	}
 	return client.Name, req.LoginHint, true
@@ -103,54 +109,95 @@ func (h *HTTP) setCookie(w http.ResponseWriter, kind, value string, ttl time.Dur
 	http.SetCookie(w, &http.Cookie{Name: h.cookieName(kind), Value: value, Path: "/", Secure: !h.development, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 }
 
+func (h *HTTP) authorizationValues(w http.ResponseWriter, r *http.Request) (url.Values, error) {
+	if r.Method == http.MethodPost {
+		return h.parseProtocolForm(w, r)
+	}
+	if len(r.URL.RawQuery) > 32<<10 {
+		return nil, ErrInvalidRequest
+	}
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, ErrInvalidRequest
+	}
+	for _, v := range values {
+		if len(v) != 1 {
+			return nil, ErrInvalidRequest
+		}
+	}
+	return values, nil
+}
 func (h *HTTP) authorize(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
-		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "OIDC is unavailable")
+		h.transient(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	values := r.URL.Query()
-	requestRaw := ""
-	if handles, ok := values["request"]; ok {
-		if len(values) != 1 || len(handles) != 1 || !cryptoutil.ValidToken(handles[0]) {
-			h.oauthError(w, 400, "invalid_request", "authorization continuation is invalid")
-			return
-		}
-		requestRaw = handles[0]
-	} else {
-		raw, req, _, err := h.service.BeginAuthorization(r.Context(), values, time.Now().UTC())
-		if err != nil {
-			if req.RedirectURI != "" {
-				state := ""
-				if v := values["state"]; len(v) == 1 && len(v[0]) <= 2048 {
-					state = v[0]
-				}
-				req.State = state
-				location := h.service.authRedirect(req, "", authorizationError(err))
-				if location != "" {
-					http.Redirect(w, r, location, http.StatusFound)
-					return
-				}
-			}
-			h.oauthError(w, http.StatusBadRequest, authorizationError(err), "authorization request was rejected")
-			return
-		}
-		requestRaw = raw
+	if !h.limiter.Allow("authorize:"+auditFromRequest(r).IP, 120, time.Second) {
+		w.Header().Set("Retry-After", "1")
+		h.oauthError(w, 429, "temporarily_unavailable", "authorization rate exceeded")
+		return
 	}
-	location, interaction, err := h.service.ContinueAuthorization(r.Context(), requestRaw, h.readCookie(r, "session"), time.Now().UTC())
+	values, err := h.authorizationValues(w, r)
+	if err != nil {
+		h.oauthError(w, 400, "invalid_request", "malformed authorization parameters")
+		return
+	}
+	browser := h.readCookie(r, "oidc_browser")
+	if browser == "" {
+		browser, err = cryptoutil.RandomToken(32)
+		if err != nil {
+			h.transient(w, r)
+			return
+		}
+		h.setCookie(w, "oidc_browser", browser, 30*time.Minute)
+	}
+	raw, req, _, err := h.service.BeginAuthorization(r.Context(), values, browser, time.Now().UTC())
+	if err != nil {
+		if req.RedirectURI != "" && authorizationError(err) != "server_error" {
+			http.Redirect(w, r, h.service.authRedirect(req, "", authorizationError(err)), http.StatusFound)
+			return
+		}
+		if authorizationError(err) == "server_error" {
+			h.transient(w, r)
+			return
+		}
+		h.oauthError(w, 400, authorizationError(err), "authorization request was rejected")
+		return
+	}
+	h.continueAuthorization(w, r, raw, browser)
+}
+func (h *HTTP) resume(w http.ResponseWriter, r *http.Request) {
+	if h.service == nil {
+		h.transient(w, r)
+		return
+	}
+	values, err := h.authorizationValues(w, r)
+	if err != nil || len(values) != 1 || !cryptoutil.ValidToken(values.Get("flow")) {
+		h.oauthError(w, 400, "invalid_request", "invalid authorization continuation")
+		return
+	}
+	h.continueAuthorization(w, r, values.Get("flow"), h.readCookie(r, "oidc_browser"))
+}
+func (h *HTTP) continueAuthorization(w http.ResponseWriter, r *http.Request, raw, browser string) {
+	w.Header().Set("Cache-Control", "no-store")
+	location, interaction, err := h.service.ContinueAuthorization(r.Context(), raw, browser, h.readCookie(r, "session"), time.Now().UTC())
 	if interaction {
-		http.Redirect(w, r, "/login?oidc="+url.QueryEscape(requestRaw), http.StatusSeeOther)
+		http.Redirect(w, r, "/login?oidc="+url.QueryEscape(raw), http.StatusSeeOther)
+		return
+	}
+	if errors.Is(err, ErrConsentRequired) {
+		h.renderConsent(w, r, raw, browser)
 		return
 	}
 	if location != "" {
 		http.Redirect(w, r, location, http.StatusFound)
 		return
 	}
-	if err != nil {
+	if err != nil && authorizationError(err) != "server_error" {
 		h.oauthError(w, 400, authorizationError(err), "authorization could not be completed")
 		return
 	}
-	h.oauthError(w, 500, "server_error", "authorization could not be completed")
+	h.transient(w, r)
 }
 
 func (h *HTTP) parseProtocolForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {
@@ -185,11 +232,19 @@ func (h *HTTP) authenticateClient(r *http.Request, form url.Values) (Client, err
 	}
 	postedSecret := form.Get("client_secret")
 	postedID := form.Get("client_id")
-	if basic && postedSecret != "" {
+	if _, present := form["client_secret"]; basic && present {
 		return Client{}, ErrInvalidClient
 	}
 	if basic {
-		clientID, secret = basicID, basicSecret
+		var err error
+		clientID, err = url.QueryUnescape(basicID)
+		if err != nil {
+			return Client{}, ErrInvalidClient
+		}
+		secret, err = url.QueryUnescape(basicSecret)
+		if err != nil {
+			return Client{}, ErrInvalidClient
+		}
 		if postedID != "" && postedID != clientID {
 			return Client{}, ErrInvalidClient
 		}
@@ -200,7 +255,10 @@ func (h *HTTP) authenticateClient(r *http.Request, form url.Values) (Client, err
 		return Client{}, ErrInvalidClient
 	}
 	client, err := h.service.Store.Client(r.Context(), clientID)
-	if err != nil || !client.Enabled {
+	if err != nil {
+		return Client{}, err
+	}
+	if !client.Enabled {
 		return Client{}, ErrInvalidClient
 	}
 	if client.Type == "public" {
@@ -215,23 +273,44 @@ func (h *HTTP) authenticateClient(r *http.Request, form url.Values) (Client, err
 }
 
 func (h *HTTP) corsOrigin(w http.ResponseWriter, r *http.Request) (string, bool) {
-	raw := strings.TrimSpace(r.Header.Get("Origin"))
-	if raw == "" {
+	w.Header().Add("Vary", "Origin")
+	headers := r.Header.Values("Origin")
+	if len(headers) == 0 {
 		return "", true
 	}
-	origin, ok := canonicalOrigin(raw)
-	if !ok || h.service == nil || !h.service.PublicOriginAllowed(r.Context(), origin) {
+	if len(headers) != 1 {
+		h.oauthError(w, 403, "invalid_request", "ambiguous Origin header")
+		return "", false
+	}
+	origin, valid := canonicalOrigin(headers[0])
+	if !valid {
+		h.oauthError(w, 403, "invalid_request", "invalid origin")
+		return "", false
+	}
+	if h.service == nil {
+		h.transient(w, r)
+		return "", false
+	}
+	allowed, err := h.service.PublicOriginAllowed(r.Context(), origin)
+	if err != nil {
+		h.transient(w, r)
+		return "", false
+	}
+	if !allowed {
+		h.oauthError(w, 403, "invalid_request", "origin is not registered for a public client")
 		return "", false
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Add("Vary", "Origin")
 	return origin, true
 }
 
 func (h *HTTP) preflight(methods string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin, ok := h.corsOrigin(w, r)
-		if !ok || origin == "" {
+		if !ok {
+			return
+		}
+		if origin == "" {
 			h.oauthError(w, http.StatusForbidden, "invalid_request", "origin is not registered for a public client")
 			return
 		}
@@ -281,7 +360,6 @@ func (h *HTTP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	origin, ok := h.corsOrigin(w, r)
 	if !ok {
-		h.oauthError(w, http.StatusForbidden, "invalid_request", "origin is not registered for a public client")
 		return
 	}
 	form, err := h.parseProtocolForm(w, r)
@@ -291,6 +369,10 @@ func (h *HTTP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := h.authenticateClient(r, form)
 	if err != nil {
+		if !errors.Is(err, ErrInvalidClient) {
+			h.transient(w, r)
+			return
+		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="authd"`)
 		h.oauthError(w, 401, "invalid_client", "client authentication failed")
 		return
@@ -306,7 +388,7 @@ func (h *HTTP) token(w http.ResponseWriter, r *http.Request) {
 			h.oauthError(w, 400, "invalid_request", "authorization code exchange is incomplete")
 			return
 		}
-		response, err = h.service.ExchangeCode(r.Context(), client, form.Get("code"), form.Get("redirect_uri"), form.Get("code_verifier"), time.Now().UTC())
+		response, err = h.service.ExchangeCode(r.Context(), client, form.Get("code"), form.Get("redirect_uri"), form.Get("code_verifier"), time.Now().UTC(), auditFromRequest(r))
 	case "refresh_token":
 		if form.Get("refresh_token") == "" {
 			h.oauthError(w, 400, "invalid_request", "refresh token is required")
@@ -318,9 +400,18 @@ func (h *HTTP) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if !errors.Is(err, ErrInvalidGrant) && !errors.Is(err, ErrRefreshReuse) && !errors.Is(err, ErrCodeReuse) && !errors.Is(err, ErrInvalidScope) && !errors.Is(err, ErrInvalidClient) {
+			h.transient(w, r)
+			return
+		}
 		code := "invalid_grant"
 		if errors.Is(err, ErrInvalidScope) {
 			code = "invalid_scope"
+		}
+		if errors.Is(err, ErrInvalidClient) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="authd"`)
+			h.oauthError(w, 401, "invalid_client", "client authentication failed")
+			return
 		}
 		h.oauthError(w, 400, code, "token request was rejected")
 		return
@@ -337,39 +428,75 @@ func bearer(r *http.Request) (string, bool) {
 		return "", false
 	}
 	parts := strings.SplitN(values[0], " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" || len(parts[1]) > 8192 {
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" || len(parts[1]) > maxJWTBytes {
 		return "", false
 	}
 	return parts[1], true
 }
 func (h *HTTP) userinfo(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
-		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "OIDC is unavailable")
+		h.transient(w, r)
 		return
 	}
-	origin, corsOK := h.corsOrigin(w, r)
-	if !corsOK {
-		h.oauthError(w, http.StatusForbidden, "invalid_request", "origin is not registered for a public client")
-		return
-	}
-	raw, ok := bearer(r)
+	origin, ok := h.corsOrigin(w, r)
 	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		h.oauthError(w, 400, "invalid_request", "query credentials are not accepted")
+		return
+	}
+	raw, headerOK := bearer(r)
+	if r.Method == http.MethodPost && (r.ContentLength != 0 || r.Header.Get("Content-Type") != "") {
+		form, err := h.parseProtocolForm(w, r)
+		if err != nil {
+			h.oauthError(w, 400, "invalid_request", "invalid UserInfo form")
+			return
+		}
+		if value, present := form["access_token"]; present {
+			if len(r.Header.Values("Authorization")) > 0 {
+				h.oauthError(w, 400, "invalid_request", "multiple access-token transports")
+				return
+			}
+			raw = value[0]
+			headerOK = raw != "" && len(raw) <= maxJWTBytes
+		}
+	}
+	if !headerOK {
 		h.bearerError(w)
 		return
 	}
-	now := time.Now().UTC()
-	claims, err := h.service.VerifyAccessToken(r.Context(), raw, now)
+	claims, err := h.service.VerifyAccessToken(r.Context(), raw, time.Now().UTC())
 	if err != nil {
-		h.bearerError(w)
+		if !errors.Is(err, ErrInvalidGrant) {
+			h.transient(w, r)
+		} else {
+			h.bearerError(w)
+		}
 		return
 	}
 	if origin != "" {
 		client, e := h.service.Store.Client(r.Context(), claims.ClientID)
-		if e != nil || !h.requireClientOrigin(w, origin, client) {
+		if e != nil {
+			if errors.Is(e, ErrInvalidClient) {
+				h.bearerError(w)
+			} else {
+				h.transient(w, r)
+			}
+			return
+		}
+		if !h.requireClientOrigin(w, origin, client) {
 			return
 		}
 	}
-	info, err := h.service.UserInfo(r.Context(), raw, now)
+	// Verification happened exactly once. Projection cannot reopen a database
+	// dependency or substitute different claims between signature checks.
+	info, err := userInfoClaims(claims)
+	if errors.Is(err, ErrInsufficientScope) {
+		w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="openid"`)
+		h.oauthError(w, 403, "insufficient_scope", "openid scope is required")
+		return
+	}
 	if err != nil {
 		h.bearerError(w)
 		return
@@ -390,7 +517,6 @@ func (h *HTTP) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	origin, ok := h.corsOrigin(w, r)
 	if !ok {
-		h.oauthError(w, http.StatusForbidden, "invalid_request", "origin is not registered for a public client")
 		return
 	}
 	form, err := h.parseProtocolForm(w, r)
@@ -400,6 +526,10 @@ func (h *HTTP) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := h.authenticateClient(r, form)
 	if err != nil {
+		if !errors.Is(err, ErrInvalidClient) {
+			h.transient(w, r)
+			return
+		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="authd"`)
 		h.oauthError(w, 401, "invalid_client", "client authentication failed")
 		return
@@ -411,91 +541,17 @@ func (h *HTTP) revoke(w http.ResponseWriter, r *http.Request) {
 		h.oauthError(w, 400, "invalid_request", "token is required")
 		return
 	}
-	_ = h.service.Revoke(r.Context(), form.Get("token"), client.ClientID, auditFromRequest(r))
+	if err = h.service.Revoke(r.Context(), form.Get("token"), client, auditFromRequest(r)); err != nil {
+		if errors.Is(err, ErrInvalidClient) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="authd"`)
+			h.oauthError(w, 401, "invalid_client", "client authentication failed")
+			return
+		}
+		h.transient(w, r)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-}
-
-func (h *HTTP) logout(w http.ResponseWriter, r *http.Request) {
-	if h.service == nil {
-		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "OIDC is unavailable")
-		return
-	}
-	values := r.URL.Query()
-	if r.Method == http.MethodPost {
-		var err error
-		values, err = h.parseProtocolForm(w, r)
-		if err != nil {
-			h.oauthError(w, 400, "invalid_request", "invalid logout request")
-			return
-		}
-	}
-	hint, err := single(values, "id_token_hint", false, 16<<10)
-	if err != nil {
-		h.oauthError(w, 400, "invalid_request", "invalid logout request")
-		return
-	}
-	post, err := single(values, "post_logout_redirect_uri", false, 4096)
-	if err != nil {
-		h.oauthError(w, 400, "invalid_request", "invalid logout request")
-		return
-	}
-	state, err := single(values, "state", false, 2048)
-	if err != nil {
-		h.oauthError(w, 400, "invalid_request", "invalid logout request")
-		return
-	}
-	var client Client
-	var hintedSubject string
-	var hintedSID string
-	var trusted bool
-	if hint != "" {
-		if c, subject, sid, e := h.service.LogoutClient(r.Context(), hint, time.Now().UTC()); e == nil {
-			client = c
-			hintedSubject = subject
-			hintedSID = sid
-			trusted = true
-		}
-	}
-
-	// A bare cross-site navigation to /logout must not terminate an OP
-	// session. Automatic RP-initiated logout is accepted only when a signed
-	// ID-token hint identifies the same subject as the current provider
-	// session. A valid hint remains useful when the provider session is already
-	// gone, preserving idempotent post-logout redirection.
-	ended := false
-	if raw := h.readCookie(r, "session"); raw != "" {
-		if session, e := h.service.Sessions.Session(r.Context(), raw); e == nil {
-			if trusted && session.User.ID == hintedSubject && (hintedSID == "" || hintedSID == session.ID) {
-				if e = h.service.Sessions.EndSession(r.Context(), raw, auditFromRequest(r)); e == nil {
-					ended = true
-				}
-			} else if trusted {
-				// A valid token for another subject or provider session does not
-				// authorize ending this browser's session or redirecting it to that RP.
-				trusted = false
-			}
-		} else if errors.Is(e, identity.ErrSession) {
-			// Clear only a locally-invalid/stale session cookie.
-			ended = true
-		}
-	}
-	if ended {
-		h.setCookie(w, "session", "", 0)
-	}
-	if post != "" && trusted && contains(client.LogoutURIs, post) {
-		u, err := url.Parse(post)
-		if err == nil {
-			q := u.Query()
-			if state != "" {
-				q.Set("state", state)
-			}
-			u.RawQuery = q.Encode()
-			http.Redirect(w, r, u.String(), http.StatusSeeOther)
-			return
-		}
-	}
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func auditFromRequest(r *http.Request) identity.Audit {
@@ -506,6 +562,9 @@ func auditFromRequest(r *http.Request) identity.Audit {
 	if net.ParseIP(host) == nil {
 		host = ""
 	}
+	if ip := requestid.ClientIP(r.Context()); ip != "" {
+		host = ip
+	}
 	return identity.Audit{IP: host, RequestID: requestid.From(r.Context())}
 }
 
@@ -515,4 +574,10 @@ func (h *HTTP) oauthError(w http.ResponseWriter, status int, code, description s
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "error_description": description})
+}
+
+func (h *HTTP) transient(w http.ResponseWriter, r *http.Request) {
+	slog.Warn("OIDC operation unavailable", "request_id", requestid.From(r.Context()))
+	w.Header().Set("Retry-After", "1")
+	h.oauthError(w, http.StatusServiceUnavailable, "server_error", "operation temporarily unavailable")
 }

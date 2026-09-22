@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"time"
 
 	"github.com/yellowman/authd/internal/identity"
@@ -58,21 +59,24 @@ func (s *OIDCStore) Client(ctx context.Context, clientID string) (oidc.Client, e
 	return c, err
 }
 
-func (s *OIDCStore) PublicClientRedirectURIs(ctx context.Context) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT r.uri FROM client_redirect_uris r JOIN clients c ON c.id=r.client_id WHERE c.enabled AND c.client_type='public' ORDER BY r.uri LIMIT 4096`)
+// Match the same canonical authority used by the HTTP CORS gate. A scalar
+// indexed existence query replaces a truncated full-client-catalog transfer.
+func (s *OIDCStore) PublicOriginAllowed(ctx context.Context, origin string) (bool, error) {
+	u, err := url.Parse(origin)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var uri string
-		if err = rows.Scan(&uri); err != nil {
-			return nil, err
+	alternate := origin
+	if u.Port() == "" {
+		if u.Scheme == "https" {
+			alternate = origin + ":443"
+		} else if u.Scheme == "http" {
+			alternate = origin + ":80"
 		}
-		out = append(out, uri)
 	}
-	return out, rows.Err()
+	var allowed bool
+	err = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM client_redirect_uris r JOIN clients c ON c.id=r.client_id WHERE c.enabled AND c.client_type='public' AND lower(substring(r.uri from '^(https?://[^/?#]+)')) IN ($1,$2))`, origin, alternate).Scan(&allowed)
+	return allowed, err
 }
 
 func clientByDBID(ctx context.Context, tx *sql.Tx, id string) (oidc.Client, error) {
@@ -83,12 +87,13 @@ func clientByDBID(ctx context.Context, tx *sql.Tx, id string) (oidc.Client, erro
 	return c, err
 }
 
+const authorizationColumns = `ar.client_id::text,c.client_id,ar.redirect_uri,array_to_json(ar.scopes)::text,ar.required_acr,COALESCE(ar.state,''),COALESCE(ar.nonce,''),ar.code_challenge,COALESCE(ar.login_hint,''),ar.prompt,ar.created_at,ar.expires_at,ar.browser_hash,COALESCE(ar.consent_session_id::text,''),ar.preferred_acr,array_to_json(ar.expected_subjects)::text,ar.max_age_seconds,ar.claims::text`
+
 func (s *OIDCStore) CreateAuthorizationRequest(ctx context.Context, hash []byte, req oidc.AuthorizationRequest) error {
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO authorization_requests(request_hash,client_id,redirect_uri,scopes,required_acr,state,nonce,code_challenge,login_hint,prompt,min_auth_time,created_at,expires_at)
- SELECT $1,c.id,$3,ARRAY(SELECT jsonb_array_elements_text($4::jsonb)),$5,NULLIF($6,''),NULLIF($7,''),$8,NULLIF($9,''),$10,$11,$12,$13
- FROM clients c WHERE c.client_id=$2 AND c.enabled`, hash, req.ClientID, req.RedirectURI, listJSON(req.Scopes), req.RequiredACR, req.State, req.Nonce, req.CodeChallenge, req.LoginHint, req.Prompt, req.MinAuthTime, req.CreatedAt, req.ExpiresAt)
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO authorization_requests(request_hash,client_id,redirect_uri,scopes,required_acr,state,nonce,code_challenge,login_hint,prompt,created_at,expires_at,browser_hash,preferred_acr,expected_subjects,max_age_seconds,claims)
+ SELECT $1,c.id,$3,ARRAY(SELECT jsonb_array_elements_text($4::jsonb)),$5,NULLIF($6,''),NULLIF($7,''),$8,NULLIF($9,''),$10,$11,$12,$13,$14,ARRAY(SELECT jsonb_array_elements_text($15::jsonb)),$16,$17::jsonb FROM clients c WHERE c.client_id=$2 AND c.enabled`, hash, req.ClientID, req.RedirectURI, listJSON(req.Scopes), req.RequiredACR, req.State, req.Nonce, req.CodeChallenge, req.LoginHint, req.Prompt, req.CreatedAt, req.ExpiresAt, req.BrowserHash, req.PreferredACR, listJSON(req.ExpectedSubjects), req.MaxAgeSeconds, claimsJSON(req.Claims))
 	if err != nil {
-		return dbError(err)
+		return err
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -99,31 +104,73 @@ func (s *OIDCStore) CreateAuthorizationRequest(ctx context.Context, hash []byte,
 	}
 	return nil
 }
-
-func scanAuthorization(row scanner) (oidc.AuthorizationRequest, string, error) {
-	var req oidc.AuthorizationRequest
-	var clientDBID, scopes string
-	err := row.Scan(&clientDBID, &req.ClientID, &req.RedirectURI, &scopes, &req.RequiredACR, &req.State, &req.Nonce, &req.CodeChallenge, &req.LoginHint, &req.Prompt, &req.MinAuthTime, &req.CreatedAt, &req.ExpiresAt)
+func scanAuthorization(row scanner) (req oidc.AuthorizationRequest, clientDBID string, err error) {
+	var scopes, claims, subjects string
+	err = row.Scan(&clientDBID, &req.ClientID, &req.RedirectURI, &scopes, &req.RequiredACR, &req.State, &req.Nonce, &req.CodeChallenge, &req.LoginHint, &req.Prompt, &req.CreatedAt, &req.ExpiresAt, &req.BrowserHash, &req.ConsentSessionID, &req.PreferredACR, &subjects, &req.MaxAgeSeconds, &claims)
 	if err != nil {
-		return req, "", err
+		return
 	}
 	req.Scopes, err = decodeList(scopes)
-	return req, clientDBID, err
+	if err == nil {
+		req.ExpectedSubjects, err = decodeList(subjects)
+	}
+	if err == nil {
+		err = json.Unmarshal([]byte(claims), &req.Claims)
+	}
+	return
 }
-
-func (s *OIDCStore) AuthorizationRequest(ctx context.Context, hash []byte) (oidc.AuthorizationRequest, oidc.Client, error) {
-	req, dbid, err := scanAuthorization(s.DB.QueryRowContext(ctx, `SELECT ar.client_id::text,c.client_id,ar.redirect_uri,array_to_json(ar.scopes)::text,ar.required_acr,COALESCE(ar.state,''),COALESCE(ar.nonce,''),ar.code_challenge,COALESCE(ar.login_hint,''),ar.prompt,ar.min_auth_time,ar.created_at,ar.expires_at
- FROM authorization_requests ar JOIN clients c ON c.id=ar.client_id WHERE ar.request_hash=$1`, hash))
+func authorizationTx(ctx context.Context, tx *sql.Tx, hash []byte) (oidc.AuthorizationRequest, string, error) {
+	req, cid, err := scanAuthorization(tx.QueryRowContext(ctx, `SELECT `+authorizationColumns+` FROM authorization_requests ar JOIN clients c ON c.id=ar.client_id WHERE ar.request_hash=$1 AND ar.expires_at>clock_timestamp() FOR UPDATE OF ar`, hash))
 	if errors.Is(err, sql.ErrNoRows) {
-		return req, oidc.Client{}, oidc.ErrInvalidRequest
+		err = oidc.ErrInvalidRequest
+	}
+	return req, cid, err
+}
+func (s *OIDCStore) AuthorizationRequest(ctx context.Context, hash []byte) (oidc.AuthorizationRequest, oidc.Client, error) {
+	req, _, err := scanAuthorization(s.DB.QueryRowContext(ctx, `SELECT `+authorizationColumns+` FROM authorization_requests ar JOIN clients c ON c.id=ar.client_id WHERE ar.request_hash=$1`, hash))
+	if errors.Is(err, sql.ErrNoRows) {
+		err = oidc.ErrInvalidRequest
 	}
 	if err != nil {
 		return req, oidc.Client{}, err
 	}
-	// Avoid a large join in the request lookup; the client row is separately authoritative.
 	client, err := s.Client(ctx, req.ClientID)
-	_ = dbid
 	return req, client, err
+}
+
+func (s *OIDCStore) ConsentAuthorizationRequest(ctx context.Context, rh, bh, sh []byte, allow bool, a identity.Audit) error {
+	return s.grantWrite(ctx, func(tx *sql.Tx) error {
+		req, cid, err := authorizationTx(ctx, tx, rh)
+		if err != nil {
+			return err
+		}
+		if !hmac.Equal(req.BrowserHash, bh) {
+			return oidc.ErrInvalidRequest
+		}
+		session, err := requireSession(ctx, tx, sh, false, false, false)
+		if errors.Is(err, identity.ErrSession) || errors.Is(err, identity.ErrForbidden) {
+			return oidc.ErrLoginRequired
+		}
+		if err != nil {
+			return err
+		}
+		if !oidc.SubjectMatches(req, session.User.ID) {
+			return oidc.ErrAccessDenied
+		}
+		if allow {
+			_, err = tx.ExecContext(ctx, `UPDATE authorization_requests SET consent_session_id=$2::uuid WHERE request_hash=$1`, rh, session.ID)
+		} else {
+			_, err = tx.ExecContext(ctx, `DELETE FROM authorization_requests WHERE request_hash=$1`, rh)
+		}
+		if err != nil {
+			return err
+		}
+		event := "authorization.consent_denied"
+		if allow {
+			event = "authorization.consent_granted"
+		}
+		return audit(ctx, tx, event, session.User.ID, "client", cid, a)
+	})
 }
 
 func permissionSet(values []string) map[string]bool {
@@ -200,206 +247,69 @@ func subjectFromSession(sess identity.Session) oidc.Subject {
 	return oidc.Subject{ID: sess.User.ID, SessionID: sess.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: sess.User.Enabled, Roles: append([]string(nil), sess.Roles...), Permissions: append([]string(nil), sess.Permissions...), AuthTime: sess.AuthTime, AuthMethods: append([]string(nil), sess.AuthMethods...)}
 }
 
-func (s *OIDCStore) IssueAuthorizationCode(ctx context.Context, requestHash, sessionHash, codeHash []byte, expires time.Time) (out oidc.CodeGrant, err error) {
-	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
-		req, clientDBID, e := scanAuthorization(tx.QueryRowContext(ctx, `SELECT ar.client_id::text,c.client_id,ar.redirect_uri,array_to_json(ar.scopes)::text,ar.required_acr,COALESCE(ar.state,''),COALESCE(ar.nonce,''),ar.code_challenge,COALESCE(ar.login_hint,''),ar.prompt,ar.min_auth_time,ar.created_at,ar.expires_at
- FROM authorization_requests ar JOIN clients c ON c.id=ar.client_id WHERE ar.request_hash=$1 AND ar.expires_at>now() FOR UPDATE OF ar`, requestHash))
-		if errors.Is(e, sql.ErrNoRows) {
+func (s *OIDCStore) IssueAuthorizationCode(ctx context.Context, requestHash, browserHash, sessionHash, codeHash []byte, expires time.Time) (out oidc.CodeGrant, err error) {
+	err = s.grantWrite(ctx, func(tx *sql.Tx) error {
+		req, cid, e := authorizationTx(ctx, tx, requestHash)
+		if e != nil {
+			return e
+		}
+		if !hmac.Equal(req.BrowserHash, browserHash) {
 			return oidc.ErrInvalidRequest
+		}
+		client, e := clientByDBID(ctx, tx, cid)
+		if e != nil {
+			return e
+		}
+		if !client.Enabled || !containsString(client.RedirectURIs, req.RedirectURI) {
+			return oidc.ErrInvalidRequest
+		}
+		sess, e := requireSession(ctx, tx, sessionHash, false, false, false)
+		if errors.Is(e, identity.ErrSession) || errors.Is(e, identity.ErrForbidden) {
+			return oidc.ErrLoginRequired
 		}
 		if e != nil {
 			return e
 		}
-		client, e := clientByDBID(ctx, tx, clientDBID)
-		if e != nil || !client.Enabled {
-			return oidc.ErrInvalidClient
-		}
-		sess, e := requireSession(ctx, tx, sessionHash, false, false, false)
-		if e != nil {
+		now := time.Now().UTC()
+		if !oidc.AuthenticationFresh(req, sess.AuthTime, now) || !oidc.SubjectMatches(req, sess.User.ID) {
 			return oidc.ErrLoginRequired
 		}
-		if req.MinAuthTime != nil && sess.AuthTime.Before(*req.MinAuthTime) {
-			return oidc.ErrLoginRequired
-		}
-		if !meetsACRDB(sess.AuthMethods, req.RequiredACR) {
+		if !meetsACRDB(sess.AuthMethods, req.RequiredACR) || (client.RequireMFA && !meetsACRDB(sess.AuthMethods, oidc.ACRMFA)) {
 			return oidc.ErrUnmetAuthn
 		}
-		if client.RequireMFA && !hasMFA(sess.AuthMethods) {
-			return oidc.ErrAccessDenied
+		if oidc.ConsentNeeded(req, sess.ID) {
+			return oidc.ErrConsentRequired
 		}
 		subject := subjectFromSession(sess)
-		if !clientAllows(client, req.Scopes) || !subjectAllows(subject, req.Scopes) {
+		subject.ACR = oidc.ResultACR(req, sess.AuthMethods)
+		if !clientAllows(client, req.Scopes) || !subjectAllows(subject, req.Scopes) || !oidc.ClientAllowsClaims(client, req.Claims) {
 			return oidc.ErrAccessDenied
 		}
-		_, e = tx.ExecContext(ctx, `INSERT INTO authorization_codes(code_hash,client_id,user_id,redirect_uri,scopes,nonce,code_challenge,auth_time,auth_methods,expires_at,session_id)
- VALUES($1,$2::uuid,$3::uuid,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),NULLIF($6,''),$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),$10,$11::uuid)`, codeHash, client.ID, subject.ID, req.RedirectURI, listJSON(req.Scopes), req.Nonce, req.CodeChallenge, sess.AuthTime, listJSON(sess.AuthMethods), expires, sess.ID)
+		if !expires.After(now) || expires.After(now.Add(time.Minute)) {
+			return oidc.ErrInvalidRequest
+		}
+		_, e = tx.ExecContext(ctx, `INSERT INTO authorization_codes(code_hash,client_id,user_id,redirect_uri,scopes,nonce,code_challenge,auth_time,auth_methods,expires_at,session_id,acr,claims)
+ VALUES($1,$2::uuid,$3::uuid,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),NULLIF($6,''),$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),$10,$11::uuid,$12,$13::jsonb)`, codeHash, client.ID, subject.ID, req.RedirectURI, listJSON(req.Scopes), req.Nonce, req.CodeChallenge, sess.AuthTime, listJSON(sess.AuthMethods), expires, sess.ID, subject.ACR, claimsJSON(req.Claims))
 		if e != nil {
 			return e
 		}
 		if _, e = tx.ExecContext(ctx, `DELETE FROM authorization_requests WHERE request_hash=$1`, requestHash); e != nil {
 			return e
 		}
-		out = oidc.CodeGrant{Client: client, Subject: subject, RedirectURI: req.RedirectURI, Scopes: req.Scopes, Nonce: req.Nonce}
+		out = oidc.CodeGrant{Claims: req.Claims, Client: client, Subject: subject, RedirectURI: req.RedirectURI, Scopes: req.Scopes, Nonce: req.Nonce}
 		return nil
 	})
 	return
 }
-
-func (s *OIDCStore) ConsumeAuthorizationCode(ctx context.Context, codeHash []byte, clientID, redirectURI, challenge string, now time.Time) (out oidc.CodeGrant, err error) {
-	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
-		var clientDBID, userID, redirect, scopes, nonce, storedChallenge, methods, sessionID string
-		var authTime, expires time.Time
-		var consumed *time.Time
-		e := tx.QueryRowContext(ctx, `SELECT client_id::text,user_id::text,redirect_uri,array_to_json(scopes)::text,COALESCE(nonce,''),code_challenge,auth_time,array_to_json(auth_methods)::text,expires_at,consumed_at,COALESCE(session_id::text,'')
- FROM authorization_codes WHERE code_hash=$1 FOR UPDATE`, codeHash).Scan(&clientDBID, &userID, &redirect, &scopes, &nonce, &storedChallenge, &authTime, &methods, &expires, &consumed, &sessionID)
-		if errors.Is(e, sql.ErrNoRows) {
-			return oidc.ErrInvalidGrant
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
 		}
-		if e != nil {
-			return e
-		}
-		client, e := clientByDBID(ctx, tx, clientDBID)
-		if e != nil || !client.Enabled || client.ClientID != clientID {
-			return oidc.ErrInvalidGrant
-		}
-		if consumed != nil || !now.Before(expires) || redirect != redirectURI || !hmac.Equal([]byte(storedChallenge), []byte(challenge)) {
-			return oidc.ErrInvalidGrant
-		}
-		var scopeList, methodList []string
-		if scopeList, e = decodeList(scopes); e != nil {
-			return e
-		}
-		if methodList, e = decodeList(methods); e != nil {
-			return e
-		}
-		subject, e := subjectByUserID(ctx, tx, userID)
-		if e != nil {
-			return oidc.ErrInvalidGrant
-		}
-		subject.AuthTime = authTime
-		subject.AuthMethods = methodList
-		subject.SessionID = sessionID
-		if client.RequireMFA && !hasMFA(methodList) {
-			return oidc.ErrInvalidGrant
-		}
-		if !clientAllows(client, scopeList) || !subjectAllows(subject, scopeList) {
-			return oidc.ErrInvalidGrant
-		}
-		res, e := tx.ExecContext(ctx, `UPDATE authorization_codes SET consumed_at=$2 WHERE code_hash=$1 AND consumed_at IS NULL`, codeHash, now)
-		if e != nil {
-			return e
-		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			return oidc.ErrInvalidGrant
-		}
-		out = oidc.CodeGrant{Client: client, Subject: subject, RedirectURI: redirect, Scopes: scopeList, Nonce: nonce}
-		return nil
-	})
-	return
+	}
+	return false
 }
 
-func (s *OIDCStore) CreateRefreshFamily(ctx context.Context, userID, sessionID, clientDBID string, scopes []string, authTime time.Time, authMethods []string, tokenHash []byte, idleExpires, absoluteExpires time.Time) error {
-	return (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
-		var family string
-		if e := tx.QueryRowContext(ctx, `INSERT INTO refresh_token_families(user_id,client_id,session_id,scopes,absolute_expires_at,auth_time,auth_methods)
- VALUES($1::uuid,$2::uuid,NULLIF($3,'')::uuid,ARRAY(SELECT jsonb_array_elements_text($4::jsonb)),$5,$6,ARRAY(SELECT jsonb_array_elements_text($7::jsonb))) RETURNING id::text`, userID, clientDBID, sessionID, listJSON(scopes), absoluteExpires, authTime, listJSON(authMethods)).Scan(&family); e != nil {
-			return e
-		}
-		_, e := tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3::timestamptz,$4::timestamptz),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, tokenHash, family, idleExpires, absoluteExpires, listJSON(scopes))
-		return e
-	})
-}
-
-func (s *OIDCStore) RotateRefreshToken(ctx context.Context, tokenHash, replacementHash []byte, clientID string, requested []string, now, idleExpires time.Time, a identity.Audit) (out oidc.RefreshGrant, retErr error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return out, err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, identityLock); err != nil {
-		return out, err
-	}
-	var familyID, userID, clientDBID, sessionID, familyScopes, tokenScopes, authMethods string
-	var absExpires, tokenIdle, authTime time.Time
-	var familyRevoked, consumed *time.Time
-	err = tx.QueryRowContext(ctx, `SELECT f.id::text,f.user_id::text,f.client_id::text,COALESCE(f.session_id::text,''),array_to_json(f.scopes)::text,array_to_json(rt.scopes)::text,f.absolute_expires_at,f.revoked_at,rt.idle_expires_at,rt.consumed_at,f.auth_time,array_to_json(f.auth_methods)::text
- FROM refresh_tokens rt JOIN refresh_token_families f ON f.id=rt.family_id WHERE rt.token_hash=$1 FOR UPDATE OF rt,f`, tokenHash).Scan(&familyID, &userID, &clientDBID, &sessionID, &familyScopes, &tokenScopes, &absExpires, &familyRevoked, &tokenIdle, &consumed, &authTime, &authMethods)
-	if errors.Is(err, sql.ErrNoRows) {
-		return out, oidc.ErrInvalidGrant
-	}
-	if err != nil {
-		return out, err
-	}
-	if consumed != nil {
-		if familyRevoked == nil {
-			if _, err = tx.ExecContext(ctx, `UPDATE refresh_token_families SET revoked_at=$2,revoke_reason='reuse' WHERE id=$1::uuid AND revoked_at IS NULL`, familyID, now); err != nil {
-				return out, err
-			}
-			if err = audit(ctx, tx, "token.refresh_reuse_detected", userID, "refresh_family", familyID, a); err != nil {
-				return out, err
-			}
-		}
-		if err = tx.Commit(); err != nil {
-			return out, err
-		}
-		return out, oidc.ErrRefreshReuse
-	}
-	if familyRevoked != nil || !now.Before(absExpires) || !now.Before(tokenIdle) {
-		return out, oidc.ErrInvalidGrant
-	}
-	client, err := clientByDBID(ctx, tx, clientDBID)
-	if err != nil || !client.Enabled || client.ClientID != clientID || !client.RefreshTokensEnabled {
-		return out, oidc.ErrInvalidGrant
-	}
-	var scopes, original, methods []string
-	if scopes, err = decodeList(tokenScopes); err != nil {
-		return out, err
-	}
-	if original, err = decodeList(familyScopes); err != nil {
-		return out, err
-	}
-	_ = original
-	if methods, err = decodeList(authMethods); err != nil {
-		return out, err
-	}
-	if len(requested) > 0 {
-		if !subsetStrings(requested, scopes) {
-			return out, oidc.ErrInvalidScope
-		}
-		scopes = requested
-	}
-	subject, err := subjectByUserID(ctx, tx, userID)
-	if err != nil {
-		return out, oidc.ErrInvalidGrant
-	}
-	subject.AuthTime = authTime
-	subject.AuthMethods = methods
-	subject.SessionID = sessionID
-	if client.RequireMFA && !hasMFA(methods) {
-		return out, oidc.ErrInvalidGrant
-	}
-	if !clientAllows(client, scopes) || !subjectAllows(subject, scopes) {
-		return out, oidc.ErrInvalidGrant
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET consumed_at=$2,replacement_hash=$3 WHERE token_hash=$1 AND consumed_at IS NULL`, tokenHash, now, replacementHash)
-	if err != nil {
-		return out, err
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return out, oidc.ErrInvalidGrant
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO refresh_tokens(token_hash,family_id,idle_expires_at,scopes) VALUES($1,$2::uuid,LEAST($3::timestamptz,$4::timestamptz),ARRAY(SELECT jsonb_array_elements_text($5::jsonb)))`, replacementHash, familyID, idleExpires, absExpires, listJSON(scopes)); err != nil {
-		return out, err
-	}
-	if err = audit(ctx, tx, "token.refresh", userID, "refresh_family", familyID, a); err != nil {
-		return out, err
-	}
-	if err = tx.Commit(); err != nil {
-		return out, err
-	}
-	out = oidc.RefreshGrant{FamilyID: familyID, Client: client, Subject: subject, Scopes: scopes}
-	return out, nil
-}
 func subsetStrings(a, b []string) bool {
 	set := permissionSet(b)
 	for _, v := range a {
@@ -410,26 +320,33 @@ func subsetStrings(a, b []string) bool {
 	return true
 }
 
-func (s *OIDCStore) RevokeRefreshToken(ctx context.Context, tokenHash []byte, clientID string, a identity.Audit) error {
-	return (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
-		var familyID, userID string
-		err := tx.QueryRowContext(ctx, `UPDATE refresh_token_families f
- SET revoked_at=now(),revoke_reason='revoked'
- FROM refresh_tokens rt, clients c
- WHERE rt.family_id=f.id AND c.id=f.client_id AND rt.token_hash=$1 AND c.client_id=$2 AND f.revoked_at IS NULL
- RETURNING f.id::text,f.user_id::text`, tokenHash, clientID).Scan(&familyID, &userID)
+func (s *OIDCStore) RevokeRefreshToken(ctx context.Context, tokenHash []byte, proof oidc.Client, a identity.Audit) error {
+	return s.grantWrite(ctx, func(tx *sql.Tx) error {
+		client, err := authenticatedClient(ctx, tx, proof.ID, proof)
+		if err != nil {
+			return err
+		}
+		var family, user string
+		var revoked *time.Time
+		err = tx.QueryRowContext(ctx, `SELECT f.id::text,f.user_id::text,f.revoked_at FROM refresh_token_families f JOIN refresh_tokens t ON t.family_id=f.id WHERE t.token_hash=$1 AND f.client_id=$2::uuid FOR UPDATE OF f`, tokenHash, client.ID).Scan(&family, &user, &revoked)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		return audit(ctx, tx, "token.revoked", userID, "refresh_family", familyID, a)
+		if revoked != nil {
+			return nil
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE refresh_token_families SET revoked_at=clock_timestamp(),revoke_reason='revoked' WHERE id=$1::uuid`, family); err != nil {
+			return err
+		}
+		return audit(ctx, tx, "token.revoked", user, "refresh_family", family, a)
 	})
 }
 
 func (s *OIDCStore) SigningKeys(ctx context.Context) (out []oidc.SigningKey, err error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id::text,kid,algorithm,private_key_ciphertext,public_jwk::text,active,created_at,retired_at FROM signing_keys ORDER BY created_at DESC`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id::text,kid,algorithm,''::bytea,public_jwk::text,active,created_at,retired_at FROM signing_keys ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +375,7 @@ func (s *OIDCStore) ActiveSigningKey(ctx context.Context) (oidc.SigningKey, erro
 func (s *OIDCStore) SigningKey(ctx context.Context, kid string) (oidc.SigningKey, error) {
 	var k oidc.SigningKey
 	var jwkText string
-	err := s.DB.QueryRowContext(ctx, `SELECT id::text,kid,algorithm,private_key_ciphertext,public_jwk::text,active,created_at,retired_at FROM signing_keys WHERE kid=$1`, kid).Scan(&k.ID, &k.KID, &k.Algorithm, &k.Ciphertext, &jwkText, &k.Active, &k.CreatedAt, &k.RetiredAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id::text,kid,algorithm,''::bytea,public_jwk::text,active,created_at,retired_at FROM signing_keys WHERE kid=$1`, kid).Scan(&k.ID, &k.KID, &k.Algorithm, &k.Ciphertext, &jwkText, &k.Active, &k.CreatedAt, &k.RetiredAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return k, oidc.ErrSigningKeyNotFound
 	}
@@ -511,7 +428,7 @@ func (s *OIDCStore) InstallSigningKey(ctx context.Context, key oidc.SigningKey, 
 }
 
 func (s *OIDCStore) AdminSigningKeys(ctx context.Context, actorHash []byte) (out []oidc.SigningKey, err error) {
-	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
+	err = (&IdentityStore{DB: s.DB}).read(ctx, func(tx *sql.Tx) error {
 		if _, e := requireSession(ctx, tx, actorHash, true, false, false); e != nil {
 			return e
 		}
@@ -555,7 +472,7 @@ func scanSigningText(row scanner) (oidc.SigningKey, error) {
 }
 
 func (s *OIDCStore) AdminClients(ctx context.Context, actorHash []byte) (out []oidc.Client, err error) {
-	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
+	err = (&IdentityStore{DB: s.DB}).read(ctx, func(tx *sql.Tx) error {
 		if _, e := requireSession(ctx, tx, actorHash, true, false, false); e != nil {
 			return e
 		}
@@ -721,3 +638,5 @@ func (s *OIDCStore) DeleteClient(ctx context.Context, actorHash []byte, clientID
 		return audit(ctx, tx, "client.deleted", actor.User.ID, "client", clientID, a)
 	})
 }
+
+func claimsJSON(v oidc.ClaimSelection) string { b, _ := json.Marshal(v); return string(b) }

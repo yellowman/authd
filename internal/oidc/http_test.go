@@ -6,9 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +28,7 @@ type fakeCode struct {
 	challenge string
 	expires   time.Time
 	consumed  bool
+	family    string
 }
 type fakeRefresh struct {
 	grant    RefreshGrant
@@ -31,6 +36,7 @@ type fakeRefresh struct {
 	expires  time.Time
 	consumed bool
 	family   string
+	absolute time.Time
 }
 type fakeOIDCStore struct {
 	mu            sync.Mutex
@@ -54,11 +60,8 @@ func (f *fakeOIDCStore) Client(_ context.Context, id string) (Client, error) {
 	}
 	return f.client, nil
 }
-func (f *fakeOIDCStore) PublicClientRedirectURIs(_ context.Context) ([]string, error) {
-	if !f.client.Enabled || f.client.Type != "public" {
-		return nil, nil
-	}
-	return append([]string(nil), f.client.RedirectURIs...), nil
+func (f *fakeOIDCStore) PublicOriginAllowed(_ context.Context, origin string) (bool, error) {
+	return clientOriginAllowed(f.client, origin), nil
 }
 func (f *fakeOIDCStore) CreateAuthorizationRequest(_ context.Context, h []byte, r AuthorizationRequest) error {
 	f.mu.Lock()
@@ -75,46 +78,92 @@ func (f *fakeOIDCStore) AuthorizationRequest(_ context.Context, h []byte) (Autho
 	}
 	return r, f.client, nil
 }
-func (f *fakeOIDCStore) IssueAuthorizationCode(_ context.Context, rh, sh, ch []byte, exp time.Time) (CodeGrant, error) {
+func (f *fakeOIDCStore) ConsentAuthorizationRequest(_ context.Context, rh, bh, sh []byte, allow bool, _ identity.Audit) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r, ok := f.requests[hashKey(rh)]
-	if !ok {
-		return CodeGrant{}, ErrInvalidRequest
+	if !ok || !hmac.Equal(r.BrowserHash, bh) {
+		return ErrInvalidRequest
 	}
 	sess, ok := f.sessions[hashKey(sh)]
 	if !ok {
+		return ErrLoginRequired
+	}
+	if allow {
+		r.ConsentSessionID = sess.ID
+		f.requests[hashKey(rh)] = r
+	} else {
+		delete(f.requests, hashKey(rh))
+	}
+	return nil
+}
+func (f *fakeOIDCStore) IssueAuthorizationCode(_ context.Context, rh, bh, sh, ch []byte, exp time.Time) (CodeGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.requests[hashKey(rh)]
+	if !ok || !hmac.Equal(r.BrowserHash, bh) {
+		return CodeGrant{}, ErrInvalidRequest
+	}
+	sess, ok := f.sessions[hashKey(sh)]
+	if !ok || !AuthenticationFresh(r, sess.AuthTime, time.Now()) {
 		return CodeGrant{}, ErrLoginRequired
 	}
-	subject := Subject{ID: sess.User.ID, SessionID: sess.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: true, Roles: sess.Roles, Permissions: sess.Permissions, AuthTime: sess.AuthTime, AuthMethods: sess.AuthMethods}
+	if ConsentNeeded(r, sess.ID) {
+		return CodeGrant{}, ErrConsentRequired
+	}
+	subject := Subject{ID: sess.User.ID, SessionID: sess.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: true, Roles: sess.Roles, Permissions: sess.Permissions, AuthTime: sess.AuthTime, AuthMethods: sess.AuthMethods, ACR: ResultACR(r, sess.AuthMethods)}
 	if !meetsACR(sess.AuthMethods, r.RequiredACR) {
 		return CodeGrant{}, ErrUnmetAuthn
 	}
 	if !subjectCanGrant(sess, f.client, r.Scopes) {
 		return CodeGrant{}, ErrAccessDenied
 	}
-	g := CodeGrant{Client: f.client, Subject: subject, RedirectURI: r.RedirectURI, Scopes: r.Scopes, Nonce: r.Nonce}
+	g := CodeGrant{Claims: r.Claims, Client: f.client, Subject: subject, RedirectURI: r.RedirectURI, Scopes: r.Scopes, Nonce: r.Nonce}
 	f.codes[hashKey(ch)] = &fakeCode{grant: g, challenge: r.CodeChallenge, expires: exp}
 	delete(f.requests, hashKey(rh))
 	return g, nil
 }
-func (f *fakeOIDCStore) ConsumeAuthorizationCode(_ context.Context, h []byte, clientID, redirect, challenge string, now time.Time) (CodeGrant, error) {
+func (f *fakeOIDCStore) RedeemCode(_ context.Context, proof Client, h []byte, redirect, challenge string, now time.Time, _ identity.Audit, issue TokenIssuer) (TokenResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.codes[hashKey(h)]
-	if !ok || rec.consumed || !now.Before(rec.expires) || clientID != rec.grant.Client.ClientID || redirect != rec.grant.RedirectURI || !hmac.Equal([]byte(challenge), []byte(rec.challenge)) {
-		return CodeGrant{}, ErrInvalidGrant
+	if !ok || proof.ClientID != rec.grant.Client.ClientID || !f.client.Enabled || !hmac.Equal(proof.SecretHash, f.client.SecretHash) || redirect != rec.grant.RedirectURI || !hmac.Equal([]byte(challenge), []byte(rec.challenge)) {
+		return TokenResponse{}, ErrInvalidGrant
+	}
+	if rec.consumed {
+		if rec.family != "" {
+			f.familyRevoked[rec.family] = true
+		}
+		return TokenResponse{}, ErrCodeReuse
+	}
+	if !now.Before(rec.expires) {
+		return TokenResponse{}, ErrInvalidGrant
+	}
+	live := false
+	for _, sess := range f.sessions {
+		if sess.ID == rec.grant.Subject.SessionID {
+			live = true
+		}
+	}
+	if !live {
+		return TokenResponse{}, ErrInvalidGrant
+	}
+	g := rec.grant
+	g.Client = f.client
+	material, err := issue(g, f.keys[f.active], now)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if len(material.RefreshHash) > 0 {
+		rec.family = f.insertFamily(g, material)
 	}
 	rec.consumed = true
-	return rec.grant, nil
+	return material.Response, nil
 }
-func (f *fakeOIDCStore) CreateRefreshFamily(_ context.Context, userID, sessionID, clientDBID string, scopes []string, authTime time.Time, methods []string, h []byte, idle, absolute time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	family := "family-1"
-	subject := Subject{ID: userID, SessionID: sessionID, Username: "alice", DisplayName: "Alice", Email: "alice@example.test", EmailVerified: true, Enabled: true, Roles: []string{"bdcmaps-admin"}, Permissions: []string{"bdcmaps.read"}, AuthTime: authTime, AuthMethods: methods}
-	f.refresh[hashKey(h)] = &fakeRefresh{grant: RefreshGrant{FamilyID: family, Client: f.client, Subject: subject, Scopes: append([]string(nil), scopes...)}, clientID: f.client.ClientID, expires: minTime(idle, absolute), family: family}
-	return nil
+func (f *fakeOIDCStore) insertFamily(g CodeGrant, m TokenMaterial) string {
+	family := fmt.Sprintf("family-%d", len(f.refresh)+1)
+	f.refresh[hashKey(m.RefreshHash)] = &fakeRefresh{grant: RefreshGrant{Claims: g.Claims, FamilyID: family, Client: g.Client, Subject: g.Subject, Scopes: append([]string(nil), g.Scopes...)}, clientID: g.Client.ClientID, expires: minTime(m.IdleExpiresAt, m.AbsoluteExpiresAt), absolute: m.AbsoluteExpiresAt, family: family}
+	return family
 }
 func minTime(a, b time.Time) time.Time {
 	if a.Before(b) {
@@ -122,34 +171,46 @@ func minTime(a, b time.Time) time.Time {
 	}
 	return b
 }
-func (f *fakeOIDCStore) RotateRefreshToken(_ context.Context, h, replacement []byte, clientID string, requested []string, now, idle time.Time, _ identity.Audit) (RefreshGrant, error) {
+func (f *fakeOIDCStore) RedeemRefresh(_ context.Context, proof Client, h []byte, requested []string, now time.Time, _ identity.Audit, issue TokenIssuer) (TokenResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.refresh[hashKey(h)]
-	if !ok || f.familyRevoked[rec.family] || clientID != rec.clientID || !now.Before(rec.expires) {
-		return RefreshGrant{}, ErrInvalidGrant
+	if !ok || proof.ClientID != rec.clientID || !f.client.Enabled || !hmac.Equal(proof.SecretHash, f.client.SecretHash) {
+		return TokenResponse{}, ErrInvalidGrant
 	}
 	if rec.consumed {
 		f.familyRevoked[rec.family] = true
-		return RefreshGrant{}, ErrRefreshReuse
+		return TokenResponse{}, ErrRefreshReuse
+	}
+	if f.familyRevoked[rec.family] || !now.Before(rec.expires) || !now.Before(rec.absolute) {
+		return TokenResponse{}, ErrInvalidGrant
 	}
 	scopes := append([]string(nil), rec.grant.Scopes...)
 	if len(requested) > 0 {
 		if !subset(requested, scopes) {
-			return RefreshGrant{}, ErrInvalidScope
+			return TokenResponse{}, ErrInvalidScope
 		}
 		scopes = append([]string(nil), requested...)
 	}
+	g := CodeGrant{Claims: rec.grant.Claims, Client: f.client, Subject: rec.grant.Subject, Scopes: scopes}
+	material, err := issue(g, f.keys[f.active], now)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if len(material.RefreshHash) == 0 {
+		return TokenResponse{}, errors.New("missing replacement")
+	}
+	rotated := rec.grant
+	rotated.Client = f.client
+	rotated.Scopes = scopes
+	f.refresh[hashKey(material.RefreshHash)] = &fakeRefresh{grant: rotated, clientID: proof.ClientID, expires: minTime(material.IdleExpiresAt, rec.absolute), absolute: rec.absolute, family: rec.family}
 	rec.consumed = true
-	g := rec.grant
-	g.Scopes = scopes
-	f.refresh[hashKey(replacement)] = &fakeRefresh{grant: g, clientID: clientID, expires: idle, family: rec.family}
-	return g, nil
+	return material.Response, nil
 }
-func (f *fakeOIDCStore) RevokeRefreshToken(_ context.Context, h []byte, clientID string, _ identity.Audit) error {
+func (f *fakeOIDCStore) RevokeRefreshToken(_ context.Context, h []byte, proof Client, _ identity.Audit) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if rec := f.refresh[hashKey(h)]; rec != nil && rec.clientID == clientID {
+	if rec := f.refresh[hashKey(h)]; rec != nil && rec.clientID == proof.ClientID {
 		f.familyRevoked[rec.family] = true
 	}
 	return nil
@@ -258,7 +319,11 @@ func (s *fakeSessions) EndSession(_ context.Context, raw string, _ identity.Audi
 	return nil
 }
 
-func providerFixture(t *testing.T) (*HTTP, *Service, *fakeOIDCStore, *fakeSessions, string, string) {
+var fixtureKeyOnce sync.Once
+var fixtureKey SigningKey
+var fixtureKeyErr error
+
+func providerFixture(t testing.TB) (*HTTP, *Service, *fakeOIDCStore, *fakeSessions, string, string) {
 	t.Helper()
 	master := sha256.Sum256([]byte("test master key material for oidc"))
 	secret := "client-secret"
@@ -267,6 +332,13 @@ func providerFixture(t *testing.T) (*HTTP, *Service, *fakeOIDCStore, *fakeSessio
 	sessions := &fakeSessions{store: store, byRaw: map[string]identity.Session{}}
 	svc, err := NewService(store, sessions, "https://auth.example.test", master[:], time.Minute, 30*24*time.Hour, 90*24*time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureKeyOnce.Do(func() { fixtureKey, fixtureKeyErr = generateSigningKey(master[:]) })
+	if fixtureKeyErr != nil {
+		t.Fatal(fixtureKeyErr)
+	}
+	if _, err = store.InstallSigningKey(context.Background(), fixtureKey, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = svc.EnsureSigningKey(context.Background()); err != nil {
@@ -290,7 +362,7 @@ func TestAuthorizationCodePKCEBDCMapsFlow(t *testing.T) {
 	h, _, _, _, sessionRaw, secret := providerFixture(t)
 	mux := muxFor(h)
 	verifier, challenge := verifierAndChallenge()
-	q := url.Values{"response_type": {"code"}, "client_id": {"bdcmaps"}, "redirect_uri": {"https://bdc.example.test/auth/callback"}, "scope": {"openid profile email groups offline_access bdcmaps.read"}, "state": {"state-1"}, "nonce": {"nonce-1"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	q := url.Values{"response_type": {"code"}, "client_id": {"bdcmaps"}, "redirect_uri": {"https://bdc.example.test/auth/callback"}, "scope": {"openid profile email groups offline_access bdcmaps.read"}, "prompt": {"consent"}, "state": {"state-1"}, "nonce": {"nonce-1"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest("GET", "https://auth.example.test/authorize?"+q.Encode(), nil))
 	if w.Code != 303 || !strings.HasPrefix(w.Header().Get("Location"), "/login?") {
@@ -300,14 +372,19 @@ func TestAuthorizationCodePKCEBDCMapsFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindingCookies := w.Result().Cookies()
 	requestHandle := loginURL.Query().Get("oidc")
 	if !cryptoutil.ValidToken(requestHandle) {
 		t.Fatal("missing authorization continuation handle")
 	}
-	r := httptest.NewRequest("GET", "https://auth.example.test/authorize?request="+url.QueryEscape(requestHandle), nil)
+	r := httptest.NewRequest("GET", "https://auth.example.test/authorize/resume?flow="+url.QueryEscape(requestHandle), nil)
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	for _, c := range bindingCookies {
+		r.AddCookie(c)
+	}
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
+	w = approveTestConsent(t, h, w, sessionRaw, bindingCookies)
 	if w.Code != 302 {
 		t.Fatalf("resume: %d %s", w.Code, w.Body.String())
 	}
@@ -338,15 +415,6 @@ func TestAuthorizationCodePKCEBDCMapsFlow(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"groups":["bdcmaps-admin"]`) {
 		t.Fatalf("userinfo: %d %s", w.Code, w.Body.String())
 	}
-	// Authorization codes are one-use.
-	r = httptest.NewRequest("POST", "https://auth.example.test/token", strings.NewReader(form.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, r)
-	if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_grant") {
-		t.Fatal("code replay accepted")
-	}
-	// Refresh rotates; replay of the consumed token compromises the family.
 	refreshForm := url.Values{"grant_type": {"refresh_token"}, "client_id": {"bdcmaps"}, "client_secret": {secret}, "refresh_token": {tokens.RefreshToken}}
 	r = httptest.NewRequest("POST", "https://auth.example.test/token", strings.NewReader(refreshForm.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -367,6 +435,16 @@ func TestAuthorizationCodePKCEBDCMapsFlow(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatal("refresh replay accepted")
 	}
+	// Authorization codes are one-use.
+	r = httptest.NewRequest("POST", "https://auth.example.test/token", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_grant") {
+		t.Fatal("code replay accepted")
+	}
+	// Refresh rotates; replay of the consumed token compromises the family.
+
 }
 
 func TestPromptNoneReturnsTrustedErrorRedirect(t *testing.T) {
@@ -425,7 +503,7 @@ func TestClientSecretBasicAndLogout(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != 303 || w.Header().Get("Location") != "https://bdc.example.test/?state=bye" || !sessions.ended {
+	if w.Code != 302 || w.Header().Get("Location") != "https://bdc.example.test/?state=bye" || !sessions.ended {
 		t.Fatalf("logout %d %s ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
 }
@@ -461,7 +539,7 @@ func TestLogoutWithoutTrustedHintDoesNotEndSession(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusSeeOther || sessions.ended {
+	if w.Code != http.StatusOK || sessions.ended {
 		t.Fatalf("bare logout ended session: status=%d ended=%v", w.Code, sessions.ended)
 	}
 	if _, ok := sessions.byRaw[sessionRaw]; !ok {
@@ -478,7 +556,7 @@ func TestLogoutHintForDifferentSubjectDoesNotEndCurrentSession(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" || sessions.ended {
+	if w.Code != http.StatusOK || w.Header().Get("Location") != "" || sessions.ended {
 		t.Fatalf("cross-subject logout accepted: status=%d location=%q ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
 }
@@ -492,7 +570,7 @@ func TestExpiredLogoutHintForCurrentSubjectIsAccepted(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "https://bdc.example.test/?state=done" || !sessions.ended {
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "https://bdc.example.test/?state=done" || !sessions.ended {
 		t.Fatalf("expired logout hint rejected: status=%d location=%q ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
 }
@@ -581,19 +659,59 @@ func TestJWTInputIsBounded(t *testing.T) {
 func beginAndAuthorize(t *testing.T, h *HTTP, sessionRaw, scope, verifier, challenge string) string {
 	t.Helper()
 	mux := muxFor(h)
-	q := url.Values{"response_type": {"code"}, "client_id": {"bdcmaps"}, "redirect_uri": {"https://bdc.example.test/auth/callback"}, "scope": {scope}, "state": {"s"}, "nonce": {"n"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	q := url.Values{"response_type": {"code"}, "client_id": {"bdcmaps"}, "redirect_uri": {"https://bdc.example.test/auth/callback"}, "scope": {scope}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	if contains(strings.Fields(scope), "offline_access") {
+		q.Set("prompt", "consent")
+	}
 	r := httptest.NewRequest("GET", "https://auth.example.test/authorize?"+q.Encode(), nil)
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusFound {
+	w = approveTestConsent(t, h, w, sessionRaw, w.Result().Cookies())
+	if w.Code != 302 {
 		t.Fatalf("authorize: %d %s", w.Code, w.Body.String())
 	}
-	location, err := url.Parse(w.Header().Get("Location"))
-	if err != nil || location.Query().Get("code") == "" {
-		t.Fatalf("authorization code missing: %s", w.Header().Get("Location"))
+	u, _ := url.Parse(w.Header().Get("Location"))
+	if u.Query().Get("code") == "" {
+		t.Fatalf("no code: %s", u)
 	}
-	return location.Query().Get("code")
+	return u.Query().Get("code")
+}
+func interactionFields(t *testing.T, body string) url.Values {
+	t.Helper()
+	v := url.Values{}
+	re := regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)"`)
+	for _, m := range re.FindAllStringSubmatch(body, -1) {
+		v.Set(html.UnescapeString(m[1]), html.UnescapeString(m[2]))
+	}
+	return v
+}
+func approveTestConsent(t *testing.T, h *HTTP, w *httptest.ResponseRecorder, sessionRaw string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "/authorize/consent") {
+		return w
+	}
+	v := interactionFields(t, w.Body.String())
+	v.Set("decision", "allow")
+	r := httptest.NewRequest("POST", "https://auth.example.test/authorize/consent", strings.NewReader(v.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	w = httptest.NewRecorder()
+	muxFor(h).ServeHTTP(w, r)
+	if w.Code != 303 {
+		t.Fatalf("consent: %d %s", w.Code, w.Body.String())
+	}
+	r = httptest.NewRequest("GET", "https://auth.example.test"+w.Header().Get("Location"), nil)
+	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	w = httptest.NewRecorder()
+	muxFor(h).ServeHTTP(w, r)
+	return w
 }
 
 func TestBadPKCEDoesNotConsumeAuthorizationCode(t *testing.T) {
@@ -793,6 +911,7 @@ func TestACRValuesMFAStepUpAndSIDSurviveRefresh(t *testing.T) {
 		"client_id":             {"bdcmaps"},
 		"redirect_uri":          {"https://bdc.example.test/auth/callback"},
 		"scope":                 {"openid offline_access"},
+		"prompt":                {"consent"},
 		"state":                 {"step-up"},
 		"nonce":                 {"nonce-step-up"},
 		"acr_values":            {ACRMFA},
@@ -813,6 +932,7 @@ func TestACRValuesMFAStepUpAndSIDSurviveRefresh(t *testing.T) {
 	if w.Code != http.StatusSeeOther || !strings.HasPrefix(w.Header().Get("Location"), "/login?") {
 		t.Fatalf("step-up was not requested: %d %s", w.Code, w.Header().Get("Location"))
 	}
+	bindingCookies := w.Result().Cookies()
 	loginURL, _ := url.Parse(w.Header().Get("Location"))
 	requestHandle := loginURL.Query().Get("oidc")
 	if !cryptoutil.ValidToken(requestHandle) {
@@ -825,10 +945,14 @@ func TestACRValuesMFAStepUpAndSIDSurviveRefresh(t *testing.T) {
 	sess.AuthTime = time.Now().UTC()
 	sessions.byRaw[sessionRaw] = sess
 	store.sessions[hashKey(identity.Hash(sessionRaw))] = sess
-	r = httptest.NewRequest(http.MethodGet, "https://auth.example.test/authorize?request="+url.QueryEscape(requestHandle), nil)
+	r = httptest.NewRequest(http.MethodGet, "https://auth.example.test/authorize/resume?flow="+url.QueryEscape(requestHandle), nil)
+	for _, c := range bindingCookies {
+		r.AddCookie(c)
+	}
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
+	w = approveTestConsent(t, h, w, sessionRaw, bindingCookies)
 	if w.Code != http.StatusFound {
 		t.Fatalf("step-up resume: %d %s", w.Code, w.Body.String())
 	}
@@ -873,7 +997,7 @@ func TestACRValuesMFAStepUpAndSIDSurviveRefresh(t *testing.T) {
 	}
 }
 
-func TestUnsupportedACRReturnsUnmetAuthenticationRequirements(t *testing.T) {
+func TestUnsupportedEssentialACRReturnsUnmetAuthenticationRequirements(t *testing.T) {
 	h, _, _, _, _, _ := providerFixture(t)
 	_, challenge := verifierAndChallenge()
 	q := url.Values{
@@ -882,7 +1006,7 @@ func TestUnsupportedACRReturnsUnmetAuthenticationRequirements(t *testing.T) {
 		"redirect_uri":          {"https://bdc.example.test/auth/callback"},
 		"scope":                 {"openid"},
 		"state":                 {"unsupported-acr"},
-		"acr_values":            {"urn:example:acr:hardware-only"},
+		"claims":                {`{"id_token":{"acr":{"essential":true,"values":["urn:example:acr:hardware-only"]}}}`},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}
@@ -925,7 +1049,7 @@ func TestLogoutHintForDifferentSIDDoesNotEndCurrentSession(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" || sessions.ended {
+	if w.Code != http.StatusOK || w.Header().Get("Location") != "" || sessions.ended {
 		t.Fatalf("cross-sid logout accepted: status=%d location=%q ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
 }

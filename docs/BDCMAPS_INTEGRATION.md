@@ -151,3 +151,17 @@ Before calling the first integration complete, exercise this exact sequence:
 9. A changed authd role is reflected at the next bdcmaps login.
 10. Disabled authd users cannot establish new bdcmaps sessions.
 ```
+
+## v0.9.0 qualification additions
+
+The configured `openid profile email groups` code-flow profile remains valid.
+Do not claim real BDC interoperability from authd's similarly shaped test client.
+Run the actual BDC callback with this release. BDC's own local role mapping/session
+lifetime still needs an explicit revocation policy; it is not bounded by authd's
+five-minute JWT lifetime.
+
+A client that is extended to request refresh tokens must request
+`openid offline_access` with `prompt=consent`, handle the provider's consent page,
+and serialize refresh-token rotation. Use an essential `acr` claim selector or
+client `require_mfa` for mandatory MFA, never `acr_values` alone. For full examples
+and validation rules read `RP_INTEGRATION.md`.

@@ -1,0 +1,26 @@
+--- FAIL: TestAuditAuthorizationPost (0.40s)
+    audit_regression_test.go:25: POST authorization: 405 Method Not Allowed
+--- FAIL: TestAuditProtocolParameters (1.75s)
+    --- FAIL: TestAuditProtocolParameters/request (0.00s)
+        audit_regression_test.go:38: status 400 location "" body {"error":"invalid_request","error_description":"authorization continuation is invalid"}
+    --- FAIL: TestAuditProtocolParameters/request_uri (0.00s)
+        audit_regression_test.go:38: status 302 location "https://bdc.example.test/auth/callback?code=61JDwIGSIaLc84-qkMD7c1pg3O3ziRX1haPkpWetD9Y&iss=https%3A%2F%2Fauth.example.test&state=audit-state" body <a href="https://bdc.example.test/auth/callback?code=61JDwIGSIaLc84-qkMD7c1pg3O3ziRX1haPkpWetD9Y&amp;iss=https%3A%2F%2Fauth.example.test&amp;state=audit-state">Found</a>.
+
+    --- FAIL: TestAuditProtocolParameters/response_type (0.00s)
+        audit_regression_test.go:38: status 302 location "https://bdc.example.test/auth/callback?error=invalid_request&iss=https%3A%2F%2Fauth.example.test&state=audit-state" body <a href="https://bdc.example.test/auth/callback?error=invalid_request&amp;iss=https%3A%2F%2Fauth.example.test&amp;state=audit-state">Found</a>.
+
+    --- FAIL: TestAuditProtocolParameters/response_mode (0.00s)
+        audit_regression_test.go:38: status 302 location "https://bdc.example.test/auth/callback?code=6_Fe_fc6k94iaKxgFIh4nXty_BUy7eoa5ZTrmreOYS4&iss=https%3A%2F%2Fauth.example.test&state=audit-state" body <a href="https://bdc.example.test/auth/callback?code=6_Fe_fc6k94iaKxgFIh4nXty_BUy7eoa5ZTrmreOYS4&amp;iss=https%3A%2F%2Fauth.example.test&amp;state=audit-state">Found</a>.
+
+--- FAIL: TestAuditUnknownACRIsVoluntary (0.55s)
+    audit_regression_test.go:45: voluntary ACR became a hard rejection: https://bdc.example.test/auth/callback?error=unmet_authentication_requirements&iss=https%3A%2F%2Fauth.example.test&state=audit-state <a href="https://bdc.example.test/auth/callback?error=unmet_authentication_requirements&amp;iss=https%3A%2F%2Fauth.example.test&amp;state=audit-state">Found</a>.
+
+--- FAIL: TestAuditBasicUsesFormEncoding (0.39s)
+    audit_regression_test.go:52: encoded client credentials rejected: invalid client
+--- FAIL: TestAuditRevocationFailureIsNotSuccess (0.39s)
+    audit_regression_test.go:61: revocation failure status=200, want 503
+--- FAIL: TestAuditUserInfoRequiresOpenIDScope (0.66s)
+    audit_regression_test.go:67: non-OIDC access token admitted to UserInfo
+FAIL
+FAIL	github.com/yellowman/authd/internal/oidc	4.137s
+FAIL

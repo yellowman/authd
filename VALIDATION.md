@@ -1,169 +1,105 @@
-# v0.8.4 validation record
+# v0.9.0 validation record
 
-## v0.8.4 native deployment/update additions — not yet externally rerun
+This is source-delivery evidence, not a production approval or OpenID
+certification. Audit base: `db7cae8` (v0.8.4). All evidence below refers to the
+new tree unless explicitly labeled historical. No replacement pgx/Argon2 modules
+or alternate fake production executable were used.
 
-v0.8.4 retains the PostgreSQL role/database bootstrap plus OpenBSD rc.d and Linux systemd layouts, and changes native installation from a first-install-only contract to the normal repeatable model. Missing env/master-key state is created on first install; later installs preserve active env, pgpass, master key, and PostgreSQL data while refreshing binary/documentation/examples/service definitions. Schema migration remains explicit under the migration-owner credential. These deployment artifacts have passed source/static/offline checks in the authoring environment but have **not yet** been rerun through a native OpenBSD or Linux service upgrade witness. The successful external v0.8.1 provider/PostgreSQL evidence below remains valid for the core it exercised.
+## Executed here
 
-Authoring-environment evidence for this tranche:
+Environment: Linux/amd64, Go 1.23.2. Production module minimum: Go 1.26.0.
 
-- `./scripts/check-offline.sh` PASS after the deployment/code changes;
-- `git diff --check` PASS;
-- `make env-check` PASS, proving the OpenBSD/systemd env examples equal the canonical `.env.example`;
-- `make linux-deploy-check` PASS using `systemd-analyze verify` on the exact unit directives with source-tree path substitutions for the not-yet-installed binary/env file;
-- OpenBSD rc.d syntax remains checked with native `ksh -n` when available, and `make verify-openbsd` includes the native check;
-- staged OpenBSD and Linux installs create only package assets/examples and do **not** create active env, pgpass, master key, user, or group state inside `DESTDIR`;
-- a real-host-style temporary `install-config` was executed twice in the authoring container and the second run preserved the byte contents of the active env, master key, and pgpass while reasserting their expected modes.
-
-The PostgreSQL `create-database.sql`, actual rc.d privilege/env behavior, actual systemd sandbox/env behavior, and a real native upgrade remain external qualification items.
-
-## External OpenBSD/PostgreSQL qualification — 2026-09-22
-
-An independent test copy was built and exercised on OpenBSD/amd64 with Go 1.27 and a disposable real PostgreSQL schema. The test found two repository defects that are fixed in v0.8.1: the integration helper had a stale hard-coded migration count after migration 004, and PostgreSQL required explicit `timestamptz` casts for the two parameters passed to `LEAST` when inserting refresh-token idle expiry. The migration-count duplication was removed rather than changed from 3 to 4 because `CheckSchema` already validates the exact embedded manifest.
-
-Exercised successfully after those fixes:
-
-- OpenBSD/amd64 build with Go 1.27;
-- unit tests for identity, password parsing, crypto, OIDC, web, TOTP, configuration, and database code;
-- `go vet` and formatting checks;
-- real PostgreSQL migrations/schema validation and identity/user/role/permission lifecycle;
-- sessions, bootstrap, cleanup, MFA recovery state, OIDC client registration, authorization continuations and one-use codes;
-- refresh rotation/replay/revocation, signing-key rotation, and client deletion cascades;
-- live authd process with PostgreSQL: bootstrap CLI, setup/login forms, admin client registration, discovery, login redirect, Authorization Code + PKCE, `client_secret_post`, ID-token claims, UserInfo, and refresh-token rotation.
-
-Not exercised by that run:
-
-- actual bdcmaps callback or the deployment at `maps.ykwc.com`;
-- HTTPS/nginx/certificates/secure production cookies/DNS/reverse-proxy headers;
-- non-loopback production issuer;
-- PostgreSQL runtime-role separation, TLS, backup/restore/failover;
-- OpenBSD `rc.d` installation/boot;
-- live MFA/TOTP enrollment/login;
-- live public-client or `client_secret_basic` flows (provider tests only);
-- external OIDC conformance testing;
-- race detector (`-race` is unsupported on OpenBSD/amd64);
-- master-key persistence/rotation and multi-instance behavior;
-- production bdcmaps schema/data.
-
-The external run generated the dependency lock state now committed as `go.sum`. The module minimum is Go 1.26 because `golang.org/x/crypto v0.57.0` declares Go 1.26.
-
-
-This is a source-delivery validation record, not a production signoff or an OIDC
-conformance certificate. No replacement pgx or x/crypto module is used by the
-reported checks.
-
-## Executed in the authoring environment
-
-The authoring container toolchain is Go 1.23.2. The production module requires Go 1.26 and
-its selected pgx/x/crypto modules are not available for download in this sandbox.
-Within that boundary, the following checks passed on the current v0.8.4 tree:
-
-| Check | Result and scope |
+| Check | Result and boundary |
 |---|---|
-| `gofmt` cleanliness | PASS for all `cmd`/`internal` Go source |
-| `git diff --check` | PASS |
-| shell syntax | PASS for `scripts/*.sh` |
-| `./scripts/check-offline.sh` | PASS |
-| race detector | PASS for config, cryptoutil, identity, db, oidc, requestid, totp, web and standalone password-encoding parser |
-| `go vet` | PASS for those same real stdlib-only packages |
-| OIDC HTTP/service suite | PASS using real RSA/JWT/JWK/PKCE/TOTP-independent production code and an in-memory protocol store |
-| OIDC SQL integration source | Typechecks together with the existing real-PostgreSQL integration body; not executed |
-| embedded HTML templates | PASS parsing/rendering tests, including the OIDC-client administration and one-time-secret templates |
-| missing-database gate | PASS negative witness: `make integration` without explicit disposable-DB consent exits nonzero (make status 2) |
+| Six initial protocol regression groups against baseline | Failed as expected; original defects reproduced |
+| 102 named top-level tests in stdlib-only packages | PASS; actual config/crypto/identity/db/oidc/TOTP/web code, protocol store fixtures |
+| Two standalone password-encoding tests | PASS; bounds/parser only, not Argon2 derivation |
+| Race detector | PASS for the available real component suites, not pgx/SQL/full executable |
+| Vet | PASS for available stdlib-only packages |
+| Strict JSON fuzzing | PASS; 74,839 executions in five seconds with two workers |
+| SQL integration test source | Compiles/typechecks; NOT executed |
+| Format and diff whitespace checks | PASS |
+| Shared environment example parity | PASS |
+| Shell syntax for scripts/*.sh | PASS |
+| systemd-analyze verify | PASS with source-tree executable/env path substitutions; not service startup |
+| Applied migrations 001–004 | Byte-identical to baseline |
+| Missing disposable database gate | Fails with nonzero status, not a skipped success |
+| Production-module test attempt | Blocked before compilation: Go 1.26 minimum versus local Go 1.23.2 |
 
-The OIDC regression suite now exercises, among other cases:
+`./scripts/check-offline.sh` uses a temporary Go 1.23 modfile outside the repo,
+with network/module download disabled. It does not change committed module files,
+provide stub dependencies, exercise the Argon2 KDF, or register pgx. It compiles
+the real integration test bodies with an explicit file list but never runs them.
+The in-memory OIDC HTTP fixture uses real RSA/JWT/JWK/PKCE paths; it is not an
+independent relying party or a SQL transaction simulator.
 
-- discovery metadata required by the current bdcmaps OIDC client;
-- Authorization Code + S256 PKCE;
-- opaque server-side authorization continuations;
-- `state`, `nonce`, and RFC 9207 `iss` response handling;
-- current-bdcmaps `client_secret_post` plus `client_secret_basic`;
-- public-client `none` plus registered-origin-only CORS preflight/token/UserInfo coverage;
-- RS256 ID/access-token issuance and UserInfo role/group projection;
-- one-use authorization codes;
-- wrong-PKCE failure without consuming an otherwise valid code;
-- opaque refresh-token rotation and whole-family replay revocation;
-- persistent refresh-scope narrowing and failed broadening without consumption;
-- malformed/ambiguous client authentication failure;
-- RP logout with exact registered post-logout redirects;
-- bare and cross-subject logout requests cannot terminate the current provider session;
-- signed expired ID-token hints remain accepted for current-subject RP logout;
-- discovery advertises `acr_values_supported` and `acr`/`sid`;
-- MFA `acr_values` requests force step-up rather than issuing a weaker context;
-- unsupported ACR requirements return `unmet_authentication_requirements` to an already-trusted redirect;
-- ID Tokens emit actual `acr`/`amr` and provider-session `sid`; refresh preserves the same `sid`;
-- a valid same-subject logout hint for a different `sid` cannot terminate the current provider session;
-- duplicate logout security-parameter rejection before session destruction;
-- bounded JWT input;
-- signing-key rotation while old public verification remains available;
-- RFC 7009 request rejection when the required token is absent.
+## Retained logs
 
+Trailing whitespace is normalized in the checked-in logs; results and measured values are unchanged.
 
-The v0.7 lifecycle/deployment regression source additionally covers:
+- [Original reproduced failures](docs/validation/v0.9.0/before-fixes.log).
+- [Component/race/vet/SQL-typecheck gate](docs/validation/v0.9.0/final-offline-gate.log).
+- [Fuzz execution](docs/validation/v0.9.0/fuzz.log).
+- [Environment, full-test refusal and static checks](docs/validation/v0.9.0/environment-and-static.log).
+- [Before CPU benchmark](docs/validation/v0.9.0/benchmark-before.log).
+- [After CPU benchmark](docs/validation/v0.9.0/benchmark-after.log).
 
-- final-administrator protection on user and role deletion;
-- soft user deletion removing primary credential, role grants, sessions and refresh capability;
-- reference-safe permission rename/delete;
-- MFA recovery-code replacement and administrative authenticator reset;
-- destructive OIDC-client deletion and grant-state cascades;
-- admin signing-key listing without private ciphertext and audited key rotation;
-- expiration cleanup for sessions, pending enrollment, bootstrap state, grant state and bounded audit retention;
-- self-service profile routing plus fresh-session database enforcement source;
-- trusted-proxy source resolution, including untrusted-peer spoof rejection and malformed-chain fail-closed behavior.
-- stale user, role, permission, and OIDC-client edit versions rejected by the PostgreSQL transaction source.
-- embedded migration-manifest ordering plus real-PostgreSQL source coverage rejecting altered migration history.
-- safe internal HTTP failure correlation: request references and bounded error classes without raw secret/DSN leakage.
+The benchmark fixtures use no database or network. UserInfo's median CPU-handler
+time fell from 368.474 to 192.634 microseconds; token-pair encoding from 6.582 to
+6.055 milliseconds. UserInfo allocation count increased even though time and
+allocated bytes fell. All numbers and limitations are in `docs/OIDC_AUDIT.md`.
 
-The real-PostgreSQL integration source additionally covers durable authorization
-requests, one-use code consumption, refresh rotation/reuse revocation, token audit
-events, refusal to grant `system.admin` as an application permission, and signing
-key rotation with retired private-key ciphertext destruction plus key-lifecycle
-audit events.
+## New SQL qualification — NOT RUN
 
-`./scripts/check-offline.sh` creates a temporary dependency-free modfile outside
-the repository. It does not alter `go.mod`, add a `replace`, provide a fake pgx or
-Argon2 implementation, or build a substitute executable. The integration source
-is typechecked without the separate pgx driver-registration test file; therefore
-that step proves Go-level interface/type coherence, not SQL execution.
+The real integration suite now contains code and refresh signing-failure rollback,
+code/refresh replay and client-proof binding, unrelated-grant concurrency,
+exactly-one code winner, revocation-versus-grant commit, natural session expiry
+versus explicit revocation, browser/consent binding, narrowing/absolute expiry,
+cleanup replay retention, reserved permission constraints, migration-prefix
+validation and session-touch throttling. This is a significant replacement of the
+old grant implementation. It requires execution with the actual PostgreSQL driver
+before use; a previous release's database test cannot qualify it.
 
-## Explicitly blocked / not qualified here
+No PostgreSQL server/client binaries or usable container runtime exist here.
+Network/DNS attempts to obtain the production toolchain/modules failed. Thus the
+full executable build, actual Argon2 round trip, SQL syntax/query plans/locking,
+runtime-role grants and all five migrations remain unexecuted in this environment.
 
-A direct full-suite attempt with the installed compiler fails before compilation:
+## Historical external evidence — earlier version only
 
-```text
-go: go.mod requires go >= 1.26.0 (running go 1.23.2; GOTOOLCHAIN=local)
-```
+The user supplied a test report for a separate OpenBSD/amd64 Go 1.27 test copy.
+After fixing the stale migration-count assertion and refresh timestamp casts,
+that copy passed unit/vet/format, real disposable-PostgreSQL lifecycle tests, and
+a live provider flow through setup/login, client creation, code+PKCE,
+`client_secret_post`, ID-token claims, UserInfo and refresh rotation. Its dependency
+lock state was accepted in v0.8.1 and is unchanged by this audit.
 
-PostgreSQL and a usable container runtime are also unavailable in this authoring
-environment. Therefore the following have **not** passed here:
+That report did not cover the real BDC callback/deployment, production HTTPS,
+proxy/cookie behavior, runtime-role separation, native service boot, live MFA,
+independent conformance, race tests, master-key rotation/restore or failover.
+It does not validate this revision's new grant transactions, migration 005 or
+concurrency changes. Earlier installer preservation evidence also remains
+historical; service-manager operation was not rerun here.
 
-- full executable build using Go 1.26+ and the real pgx/x/crypto modules in this authoring container;
-- the actual Argon2id KDF round trip;
-- migrations 001/002/003/004 executed against PostgreSQL in this authoring container;
-- PostgreSQL transaction/concurrency assertions in the integration build tag in this authoring container;
-- the live daemon against a real PostgreSQL database in this authoring container;
-- the actual private `yellowman/bdcmaps` application logging into authd;
-- an independent OIDC/OAuth conformance/interoperability suite;
-- current client-admin browser interaction against the live daemon;
-- backup/restore, master-key rotation, HA or production deployment qualification.
+## Required release gates
 
-The prior v0.4 Chromium fixture review covered the base Liminal-derived login,
-account and administration layout. v0.8/v0.8.4 lifecycle/Clients/Keys/ACR branches are covered
-by template rendering tests here, but it has not been re-reviewed in a live
-browser/daemon environment and is not claimed as such.
-
-## Required full gate
-
-On a supported networked development machine:
+On a supported networked Linux test host:
 
 ```sh
 make deps
-make build
 make dev-db
 export AUTHD_TEST_DISPOSABLE=1
 export AUTHD_TEST_DATABASE_URL='postgres://authd:authd-dev-only@127.0.0.1:55432/authd?sslmode=disable'
 make verify
+make linux-deploy-check
 ```
 
-Then run `docs/BDCMAPS_INTEGRATION.md` against an actual bdcmaps instance. The
-first production candidate should not be cut until both the real database gate
-and the relying-party interoperability path pass.
+Use `make verify-openbsd` on OpenBSD; race testing remains a separate supported-
+platform requirement. Run migration against a restored existing database as well
+as a fresh one. Read the v0.9.0 upgrade section in DEPLOYMENT.md before doing so.
+
+Then execute the actual `bdcmaps` RP callback and an independent OIDC conformance
+runner. Qualify production issuer/TLS/proxy headers, secure cookies, live TOTP,
+public/Basic clients, revocation, all logout contexts, native service install/start/
+stop, owner/runtime separation, persistent keys and backup/restore. No production
+schema, production user credentials or production tenant data were accessed here.

@@ -17,9 +17,9 @@ var _ identity.Store = (*IdentityStore)(nil)
 
 const identityLock int64 = 0x6175746801
 
-// Security-relevant writes use one short transaction-scoped lock. This modest
-// single-service deployment favors a reviewable lock order over write parallelism.
-// Password KDFs never run while this lock is held.
+// Security mutations take the exclusive authority gate; unrelated OIDC grants
+// share it and lock their own rows. Credential KDFs execute before this gate,
+// then verified snapshots are rechecked inside the mutation transaction.
 func (s *IdentityStore) write(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -33,6 +33,20 @@ func (s *IdentityStore) write(ctx context.Context, fn func(*sql.Tx) error) error
 		return dbError(err)
 	}
 	return dbError(tx.Commit())
+}
+
+// Read-only administration uses a coherent MVCC snapshot rather than serializing
+// all token exchanges. Every mutation independently rechecks live authorization.
+func (s *IdentityStore) read(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func dbError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
@@ -73,7 +87,9 @@ func audit(ctx context.Context, tx *sql.Tx, event, actor, targetType, targetID s
 	return err
 }
 func (s *IdentityStore) AuditFailure(ctx context.Context, event string, a identity.Audit) error {
-	return s.write(ctx, func(tx *sql.Tx) error { return audit(ctx, tx, event, "", "", "", a) })
+	// An append-only failure record does not mutate authority; no global gate.
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit_events(event_type,source_ip,request_id) VALUES($1,NULLIF($2,'')::inet,NULLIF($3,''))`, event, a.IP, a.RequestID)
+	return err
 }
 func (s *IdentityStore) BootstrapOpen(ctx context.Context) (bool, error) {
 	var open bool
@@ -208,6 +224,24 @@ func (s *IdentityStore) CreateSession(ctx context.Context, expected identity.Log
 				return err
 			}
 		}
+		if len(session.ReplacesTokenHash) > 0 {
+			var oldSID, oldUser string
+			e := tx.QueryRowContext(ctx, `SELECT id::text,user_id::text FROM sessions WHERE token_hash=$1`, session.ReplacesTokenHash).Scan(&oldSID, &oldUser)
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return e
+			}
+			if e == nil {
+				if _, err = tx.ExecContext(ctx, `DELETE FROM authorization_codes WHERE session_id=$1::uuid AND consumed_at IS NULL`, oldSID); err != nil {
+					return err
+				}
+				if _, err = tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=$1::uuid`, oldSID); err != nil {
+					return err
+				}
+				if err = audit(ctx, tx, "session.replaced", oldUser, "session", oldSID, a); err != nil {
+					return err
+				}
+			}
+		}
 		// Credential epochs were rechecked above. Password reset, disable and MFA
 		// changes take this same lock and cannot race a stale password proof.
 		if _, err = tx.ExecContext(ctx, `INSERT INTO sessions(token_hash,csrf_hash,user_id,auth_time,auth_methods,idle_expires_at,absolute_expires_at,ip_address,user_agent)
@@ -247,7 +281,7 @@ func scanSession(row scanner) (identity.Session, error) {
 }
 func requireSession(ctx context.Context, tx *sql.Tx, hash []byte, admin, fresh, allowForced bool) (identity.Session, error) {
 	s, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM sessions s JOIN users u ON u.id=s.user_id
- WHERE s.token_hash=$1 AND s.idle_expires_at>now() AND s.absolute_expires_at>now() AND u.enabled AND u.deleted_at IS NULL`, hash))
+ WHERE s.token_hash=$1 AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() AND u.enabled AND u.deleted_at IS NULL`, hash))
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, identity.ErrSession
 	}
@@ -263,25 +297,34 @@ func requireSession(ctx context.Context, tx *sql.Tx, hash []byte, admin, fresh, 
 	return s, nil
 }
 func (s *IdentityStore) Session(ctx context.Context, hash []byte, idle time.Duration) (identity.Session, error) {
-	// One statement returns the current grants and conditionally touches the live
-	// session. It never recreates a deleted session or extends absolute expiry.
-	out, err := scanSession(s.DB.QueryRowContext(ctx, `WITH live AS (
- UPDATE sessions s SET last_seen_at=now(),idle_expires_at=LEAST(absolute_expires_at,now()+$2::bigint*interval '1 second')
+	// Authorization is always read live; only the activity write is throttled.
+	// Keep a short-idle configuration alive too, without updating every request.
+	touch := idle / 4
+	if touch > time.Minute {
+		touch = time.Minute
+	}
+	if touch < time.Millisecond {
+		touch = time.Millisecond
+	}
+	out, err := scanSession(s.DB.QueryRowContext(ctx, `WITH touched AS (
+ UPDATE sessions s SET last_seen_at=clock_timestamp(),idle_expires_at=LEAST(absolute_expires_at,clock_timestamp()+$2::bigint*interval '1 second')
  FROM users u WHERE s.token_hash=$1 AND u.id=s.user_id AND u.enabled AND u.deleted_at IS NULL
- AND s.idle_expires_at>now() AND s.absolute_expires_at>now() RETURNING s.*)
- SELECT `+sessionColumns+` FROM live s JOIN users u ON u.id=s.user_id`, hash, int64(idle.Seconds())))
+ AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp()
+ AND s.last_seen_at <= clock_timestamp()-$3::bigint*interval '1 millisecond' RETURNING s.*),
+ live AS (SELECT * FROM touched UNION ALL SELECT s.* FROM sessions s WHERE s.token_hash=$1 AND NOT EXISTS(SELECT 1 FROM touched))
+ SELECT `+sessionColumns+` FROM live s JOIN users u ON u.id=s.user_id WHERE s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() AND u.enabled AND u.deleted_at IS NULL`, hash, int64(idle.Seconds()), int64(touch/time.Millisecond)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, identity.ErrSession
 	}
 	return out, err
 }
 func (s *IdentityStore) Sessions(ctx context.Context, hash []byte) (out []identity.Session, err error) {
-	err = s.write(ctx, func(tx *sql.Tx) error {
+	err = s.read(ctx, func(tx *sql.Tx) error {
 		sess, e := requireSession(ctx, tx, hash, false, false, true)
 		if e != nil {
 			return e
 		}
-		rows, e := tx.QueryContext(ctx, `SELECT `+sessionColumns+` FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.user_id=$1::uuid AND s.idle_expires_at>now() AND s.absolute_expires_at>now() ORDER BY s.created_at DESC LIMIT 200`, sess.User.ID)
+		rows, e := tx.QueryContext(ctx, `SELECT `+sessionColumns+` FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.user_id=$1::uuid AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() ORDER BY s.created_at DESC LIMIT 200`, sess.User.ID)
 		if e != nil {
 			return e
 		}
@@ -304,6 +347,9 @@ func (s *IdentityStore) RevokeSession(ctx context.Context, hash []byte, target s
 			return e
 		}
 		if others {
+			if e = revokeSessionGrants(ctx, tx, `SELECT id FROM sessions WHERE user_id=$1::uuid AND id<>$2::uuid`, sess.User.ID, sess.ID); e != nil {
+				return e
+			}
 			if _, e = tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=$1::uuid AND id<>$2::uuid`, sess.User.ID, sess.ID); e != nil {
 				return e
 			}
@@ -318,6 +364,9 @@ func (s *IdentityStore) RevokeSession(ctx context.Context, hash []byte, target s
 		}
 		if owner != sess.User.ID && (!sess.Has("system.admin") || sess.User.ForcePasswordChange || time.Since(sess.AuthTime) > 10*time.Minute) {
 			return identity.ErrForbidden
+		}
+		if e = revokeSessionGrants(ctx, tx, `SELECT id FROM sessions WHERE id=$1::uuid`, target); e != nil {
+			return e
 		}
 		if _, e = tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=$1::uuid`, target); e != nil {
 			return e
@@ -672,4 +721,14 @@ func (s *IdentityStore) DeletePermission(ctx context.Context, hash []byte, id st
 		}
 		return audit(ctx, tx, "permission.deleted", actor.User.ID, "permission", id, a)
 	})
+}
+
+// The SQL selector is an internal constant, never caller input. Both operations
+// execute under the identity mutation lock before session rows are removed.
+func revokeSessionGrants(ctx context.Context, tx *sql.Tx, selector string, args ...any) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM authorization_codes WHERE consumed_at IS NULL AND session_id IN (`+selector+`)`, args...); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE refresh_token_families SET revoked_at=clock_timestamp(),revoke_reason='session_revoked' WHERE revoked_at IS NULL AND session_id IN (`+selector+`)`, args...)
+	return err
 }

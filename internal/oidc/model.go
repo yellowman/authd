@@ -1,6 +1,9 @@
 package oidc
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Client struct {
 	ID                   string
@@ -20,7 +23,24 @@ type Client struct {
 	UpdatedAt            time.Time
 }
 
+// ClaimSelection records explicit normal identity-claim requests. It never grants
+// application permissions and is revalidated against the current client allow-list.
+type ClaimSelection struct {
+	IDTokenValues  map[string][]json.RawMessage `json:"id_token_values,omitempty"`
+	UserInfoValues map[string][]json.RawMessage `json:"userinfo_values,omitempty"`
+	IDToken        []string                     `json:"id_token,omitempty"`
+	UserInfo       []string                     `json:"userinfo,omitempty"`
+}
+
 type AuthorizationRequest struct {
+	Claims ClaimSelection
+
+	BrowserHash      []byte
+	ConsentSessionID string
+	PreferredACR     string
+	ExpectedSubjects []string
+	MaxAgeSeconds    *int64
+
 	ClientID      string
 	RedirectURI   string
 	Scopes        []string
@@ -30,12 +50,12 @@ type AuthorizationRequest struct {
 	CodeChallenge string
 	LoginHint     string
 	Prompt        string
-	MinAuthTime   *time.Time
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 }
 
 type Subject struct {
+	ACR           string
 	ID            string
 	SessionID     string
 	Username      string
@@ -50,6 +70,7 @@ type Subject struct {
 }
 
 type CodeGrant struct {
+	Claims      ClaimSelection
 	Client      Client
 	Subject     Subject
 	RedirectURI string
@@ -58,6 +79,7 @@ type CodeGrant struct {
 }
 
 type RefreshGrant struct {
+	Claims   ClaimSelection
 	FamilyID string
 	Client   Client
 	Subject  Subject

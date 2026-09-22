@@ -45,6 +45,9 @@ type testStore struct {
 
 func (m *testStore) BootstrapOpen(context.Context) (bool, error) { return true, nil }
 func (m *testStore) Session(_ context.Context, hash []byte, _ time.Duration) (identity.Session, error) {
+	if len(m.loginSession.TokenHash) > 0 && bytes.Equal(hash, m.loginSession.TokenHash) {
+		return m.loginSession, nil
+	}
 	if m.revoked || !bytes.Equal(hash, identity.Hash(m.raw)) {
 		return identity.Session{}, identity.ErrSession
 	}

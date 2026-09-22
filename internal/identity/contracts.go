@@ -50,6 +50,8 @@ type FactorUse struct {
 	RecoveryHash []byte
 }
 type Session struct {
+	// Creation-only replacement proof, never returned as session identity.
+	ReplacesTokenHash                                                 []byte `json:"-"`
 	ID, UserAgent, IP                                                 string
 	TokenHash, CSRFHash                                               []byte
 	User                                                              User

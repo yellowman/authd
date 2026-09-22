@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var identityScopes = map[string]bool{
@@ -28,7 +27,7 @@ func single(values map[string][]string, name string, required bool, max int) (st
 		}
 		return "", nil
 	}
-	if len(items) != 1 || len(items[0]) > max {
+	if len(items) != 1 || len(items[0]) > max || required && items[0] == "" {
 		return "", ErrInvalidRequest
 	}
 	return items[0], nil
@@ -38,26 +37,37 @@ func parseScopes(raw string) ([]string, error) {
 	if len(raw) > 4096 {
 		return nil, ErrInvalidScope
 	}
+	// RFC 6749 scope-token is printable ASCII except double quote and backslash.
+	// Only ASCII SPACE separates tokens; Unicode whitespace is not a delimiter.
+	for _, c := range []byte(raw) {
+		if c != ' ' && (c < 0x21 || c > 0x7e || c == '"' || c == '\\') {
+			return nil, ErrInvalidScope
+		}
+	}
 	fields := strings.Fields(raw)
 	if len(fields) == 0 || len(fields) > 64 {
 		return nil, ErrInvalidScope
 	}
 	seen := map[string]bool{}
+	out := make([]string, 0, len(fields))
 	for _, scope := range fields {
-		if len(scope) > 256 || seen[scope] {
+		if len(scope) > 256 {
 			return nil, ErrInvalidScope
 		}
-		seen[scope] = true
+		if !seen[scope] {
+			out = append(out, scope)
+			seen[scope] = true
+		}
 	}
-	sort.Strings(fields)
-	return fields, nil
+	sort.Strings(out)
+	return out, nil
 }
 
 func validPKCEChallenge(value string) bool {
 	if len(value) != 43 {
 		return false
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
 	return err == nil && len(decoded) == 32
 }
 
@@ -97,19 +107,23 @@ func scopeAllowed(client Client, requested []string) error {
 	return nil
 }
 
-func parseMaxAge(raw string, now time.Time) (*time.Time, error) {
+func parseMaxAge(raw string) (*int64, error) {
 	if raw == "" {
 		return nil, nil
 	}
 	if len(raw) > 10 {
 		return nil, ErrInvalidRequest
 	}
-	seconds, err := strconv.ParseUint(raw, 10, 31)
+	for _, c := range raw {
+		if c < '0' || c > '9' {
+			return nil, ErrInvalidRequest
+		}
+	}
+	v, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil {
 		return nil, ErrInvalidRequest
 	}
-	t := now.Add(-time.Duration(seconds) * time.Second)
-	return &t, nil
+	return &v, nil
 }
 
 func parseACRValues(raw string, client Client, scopes []string) (string, error) {
@@ -140,7 +154,7 @@ func parseACRValues(raw string, client Client, scopes []string) (string, error) 
 		}
 	}
 	if selected == "" {
-		return "", ErrUnmetAuthn
+		return minimum, nil // acr_values is voluntary (OIDC Core 5.5.1.1).
 	}
 	if minimum == ACRMFA {
 		return ACRMFA, nil
@@ -149,7 +163,7 @@ func parseACRValues(raw string, client Client, scopes []string) (string, error) 
 }
 
 func acrForMethods(methods []string) string {
-	if contains(methods, "otp") || contains(methods, "recovery") {
+	if contains(methods, "pwd") && (contains(methods, "otp") || contains(methods, "recovery")) {
 		return ACRMFA
 	}
 	if contains(methods, "pwd") {
@@ -182,6 +196,16 @@ func contains(items []string, wanted string) bool {
 
 func authorizationError(err error) string {
 	switch {
+	case errors.Is(err, ErrUnsupportedResponse):
+		return "unsupported_response_type"
+	case errors.Is(err, ErrRequestNotSupported):
+		return "request_not_supported"
+	case errors.Is(err, ErrRequestURINotSupported):
+		return "request_uri_not_supported"
+	case errors.Is(err, ErrRegistrationNotSupported):
+		return "registration_not_supported"
+	case errors.Is(err, ErrConsentRequired):
+		return "consent_required"
 	case errors.Is(err, ErrInvalidScope):
 		return "invalid_scope"
 	case errors.Is(err, ErrLoginRequired):
@@ -190,8 +214,10 @@ func authorizationError(err error) string {
 		return "access_denied"
 	case errors.Is(err, ErrUnmetAuthn):
 		return "unmet_authentication_requirements"
-	default:
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrInvalidClient):
 		return "invalid_request"
+	default:
+		return "server_error"
 	}
 }
 

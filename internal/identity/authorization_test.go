@@ -15,3 +15,19 @@ func TestEffectivePermissionsUnion(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+func TestPermissionNamesCannotShadowIdentityScopes(t *testing.T) {
+	for _, name := range []string{"openid", "profile", "email", "groups", "roles", "offline_access"} {
+		if ValidatePermissionName(name, "") == nil {
+			t.Fatalf("reserved permission accepted: %s", name)
+		}
+		if ValidateName(name, "") != nil {
+			t.Fatalf("role names must not be confused with permission names: %s", name)
+		}
+	}
+	for _, name := range []string{"system.admin", "billing.email.send", "reports.export"} {
+		if err := ValidatePermissionName(name, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

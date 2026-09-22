@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.0 — 2026-09-22
+
+Substantive OIDC/security/performance audit of v0.8.4. Rebuilt code and refresh
+issuance as single PostgreSQL transactions with shared grant/exclusive mutation
+coordination; rollback on precommit signing failure; code-replay family revocation;
+live client-proof/session checks; browser-bound continuations and consent; corrected
+voluntary `acr_values` semantics plus essential/normal `claims`; access/ID token
+separation, strict JOSE JSON, `at_hash`, one UserInfo verification; real failure
+classes for token/revocation/logout; bounded key caches/cleanup and session writes;
+registered-origin query and missing reverse indexes. Added migration 005 and
+regressions, integration concurrency witnesses, fuzz target and before/after CPU
+benchmarks. Read docs/OIDC_AUDIT.md, VALIDATION.md and DEPLOYMENT.md before upgrade.
+Earlier ACR and offline-consent descriptions below are historical, not current policy.
+
+
 ## v0.8.4 — repeatable native install/update baseline
 
 Corrected the v0.8.3 over-specialization around greenfield deployment. `make install-openbsd` and `make install-linux` are now safe repeatable install/update targets: they create missing env/master-key state on first install, preserve existing active env/master-key/pgpass contents on later runs, and refresh the binary, examples, documentation, PostgreSQL helper SQL, and service-manager definition. Existing runtime file ownership/modes are reasserted. PostgreSQL data is never an installer-owned artifact.
