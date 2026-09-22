@@ -3,9 +3,13 @@ package web
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/oidc"
 )
 
 func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +51,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.ReturnTo = safeReturn(r.URL.Query().Get("return_to"))
+	if raw := r.URL.Query().Get("oidc"); raw != "" {
+		if client, hint, ok := s.oidc.Pending(r.Context(), raw); ok {
+			d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
+			d.ReturnTo = "/authorize"
+		}
+	}
 	s.render(w, 200, "login.html", d)
 }
 func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +70,12 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 			d := s.data("Sign in")
 			d.CSRF = s.auth.CSRF(s.cookie(r, "browser"), "browser")
 			d.ReturnTo = safeReturn(r.PostForm.Get("return_to"))
+			if raw := r.PostForm.Get("oidc_request"); raw != "" {
+				if client, hint, ok := s.oidc.Pending(r.Context(), raw); ok {
+					d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
+					d.ReturnTo = "/authorize"
+				}
+			}
 			d.Error = "Invalid credentials. Check your password and authenticator or recovery code."
 			s.render(w, 401, "login.html", d)
 		} else {
@@ -76,6 +92,12 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setCookie(w, "session", raw, s.cfg.SessionAbsoluteTTL)
 	s.setCookie(w, "browser", "", 0)
+	if raw := r.PostForm.Get("oidc_request"); raw != "" {
+		if _, _, ok := s.oidc.Pending(r.Context(), raw); ok {
+			http.Redirect(w, r, "/authorize?request="+url.QueryEscape(raw), http.StatusSeeOther)
+			return
+		}
+	}
 	http.Redirect(w, r, safeReturn(r.PostForm.Get("return_to")), http.StatusSeeOther)
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -205,9 +227,29 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	d.CSRF = s.auth.CSRF(raw, "session")
 	d.View = r.URL.Query().Get("view")
 	switch d.View {
-	case "users", "roles", "permissions", "sessions", "audit":
+	case "users", "roles", "permissions", "clients", "sessions", "audit":
 	default:
 		d.View = "users"
+	}
+	if d.View == "clients" || r.URL.Query().Get("client") != "" {
+		clients, e := s.oidc.AdminClients(r.Context(), raw)
+		if e != nil {
+			s.failure(w, r, e)
+			return
+		}
+		d.OIDCClients = clients
+		if id := r.URL.Query().Get("client"); id != "" {
+			for i := range clients {
+				if clients[i].ID == id {
+					d.SelectedClient = &clients[i]
+				}
+			}
+			if d.SelectedClient == nil {
+				http.NotFound(w, r)
+				return
+			}
+			d.View = "clients"
+		}
 	}
 	if id := r.URL.Query().Get("user"); id != "" {
 		for i := range data.Users {
@@ -289,6 +331,79 @@ func (s *Server) saveRole(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/admin/?view=roles", 303)
 }
+func splitLines(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+func clientEdit(r *http.Request) (oidc.ClientEdit, error) {
+	ttl, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get("access_token_ttl")))
+	if err != nil {
+		return oidc.ClientEdit{}, identity.Invalid("access token lifetime must be seconds")
+	}
+	return oidc.ClientEdit{ID: r.PostForm.Get("id"), ClientID: r.PostForm.Get("client_id"), Name: r.PostForm.Get("name"), Type: r.PostForm.Get("client_type"), Enabled: r.PostForm.Get("enabled") == "on", RequireMFA: r.PostForm.Get("require_mfa") == "on", RefreshTokensEnabled: r.PostForm.Get("refresh_tokens_enabled") == "on", AccessTokenTTL: time.Duration(ttl) * time.Second, RedirectURIs: splitLines(r.PostForm.Get("redirect_uris")), LogoutURIs: splitLines(r.PostForm.Get("logout_uris")), IdentityScopes: r.PostForm["identity_scopes"], PermissionIDs: r.PostForm["permissions"]}, nil
+}
+func (s *Server) createClient(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	edit, err := clientEdit(r)
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	client, secret, err := s.oidc.CreateClient(r.Context(), raw, edit, auditInfo(w, r))
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	if secret != "" {
+		d := s.data("Save the client secret")
+		d.Secret = secret
+		d.Notice = "Client " + client.ClientID + " was created. This secret is shown only in this response."
+		s.render(w, 200, "client_secret.html", d)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=clients", 303)
+}
+func (s *Server) saveClient(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	edit, err := clientEdit(r)
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	if err = s.oidc.UpdateClient(r.Context(), raw, edit, auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=clients", 303)
+}
+func (s *Server) rotateClientSecret(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	secret, err := s.oidc.RotateClientSecret(r.Context(), raw, r.PostForm.Get("id"), auditInfo(w, r))
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	d := s.data("Save the new client secret")
+	d.Secret = secret
+	d.Notice = "The old client secret no longer works. This new secret is shown only in this response."
+	s.render(w, 200, "client_secret.html", d)
+}
+
 func (s *Server) createPermission(w http.ResponseWriter, r *http.Request) {
 	_, raw, ok := s.user(w, r, true, false)
 	if !ok {

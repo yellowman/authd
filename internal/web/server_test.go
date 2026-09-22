@@ -15,6 +15,7 @@ import (
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/oidc"
 )
 
 const userID = "00000000-0000-4000-8000-000000000001"
@@ -290,7 +291,7 @@ func TestAllAdminTemplatesRenderAndEscape(t *testing.T) {
 			t.Fatal("unescaped profile")
 		}
 	}
-	for _, name := range []string{"setup.html", "login.html", "message.html", "mfa.html"} {
+	for _, name := range []string{"setup.html", "login.html", "message.html", "mfa.html", "client_secret.html"} {
 		d := s.data("test")
 		d.CSRF = s.auth.CSRF(m.raw, "session")
 		d.Secret = "ABCD"
@@ -306,6 +307,17 @@ func TestAllAdminTemplatesRenderAndEscape(t *testing.T) {
 	s.render(w, 200, "mfa.html", d)
 	if w.Code != 200 {
 		t.Fatal("recovery template")
+	}
+	clients := s.data("clients")
+	clients.View = "clients"
+	clients.Session = m.session
+	clients.Admin = m.snapshot
+	clients.OIDCClients = []oidc.Client{{ID: userID, ClientID: "bdcmaps", Name: "BDC Maps", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://bdc.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email", "groups"}}}
+	clients.SelectedClient = &clients.OIDCClients[0]
+	w = httptest.NewRecorder()
+	s.render(w, 200, "admin.html", clients)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "bdcmaps") {
+		t.Fatal("OIDC client administration template")
 	}
 }
 func TestNoSecretsInRequestLogs(t *testing.T) {

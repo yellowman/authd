@@ -1,60 +1,73 @@
 # authd
 
 A small Go identity and access service backed by PostgreSQL. Own users, primary
-credentials, roles, permissions, and MFA once; let applications consume that
-identity through OIDC. The first planned relying party is `yellowman/bdcmaps`.
+credentials, roles, permissions, MFA, provider sessions, and OIDC once; let many
+applications consume the same identity. The first relying-party target is
+`yellowman/bdcmaps`.
 
-## v0.4 — local identity implementation
+## v0.5 — OIDC provider implementation
 
-This version replaces the login/admin shell with implemented handlers and a
-transactional PostgreSQL repository. **It is not yet a functioning OIDC provider
-or a production-qualified authentication service.** Authorization, token issuance,
-refresh, UserInfo, and RP-initiated logout remain explicit 501 endpoints. Discovery
-is a development contract preview, not a conformance claim. See `VALIDATION.md`.
+v0.5 adds the protocol path on top of the v0.4 local-identity implementation.
+**This is implemented source, not production qualification.** The authoring
+environment cannot run PostgreSQL, download the selected Go 1.25 toolchain/modules,
+or run the actual private bdcmaps application. See `VALIDATION.md` for the exact
+evidence boundary.
 
-Implemented in this source revision:
+Implemented in this revision:
 
-- One-time administrator bootstrap, with a permanent installation-state guard.
-- Password login; current enabled state and password snapshot rechecked before
-  inserting a session. Zero-role accounts can sign in without receiving privileges.
-- Hashed provider sessions, session-bound CSRF, idle/absolute expiry, local logout,
-  per-session revocation, and logout of other sessions.
-- User creation/editing, role assignment, enable/disable, password change/reset,
-  forced password change, role editing, and permission creation.
-- `system.admin` checks at the HTTP boundary and again inside write transactions;
-  recent authentication for privileged writes; final-administrator protection.
-- Encrypted TOTP enrollment, confirmation, mandatory second-factor verification
-  for enrolled users, single-use recovery codes, and authenticated MFA removal.
-- Transactional audit records; password/MFA changes revoke provider sessions,
-  outstanding authorization codes, and existing refresh-token families.
-- Explicit email verification, cleared when the normalized address changes.
-- Bounded password-hash work and hash parsing, process-local rate limits, strict
-  deployment configuration, and server-rendered responsive account/admin forms.
+- OpenID Connect discovery and OAuth authorization-server metadata.
+- Encrypted persisted 3072-bit RSA signing keys, RS256 JWTs, JWKS publication,
+  signing-key rotation overlap, and destruction of retired private-key ciphertext.
+- Authorization Code flow with exact redirect matching and mandatory PKCE S256.
+- Durable server-side authorization continuations; the browser carries only an
+  opaque random handle through login, so OAuth state/nonce/challenge values do not
+  pass through login forms and parallel application logins do not share one cookie.
+- `state`, `nonce`, `login_hint`, `prompt=none`, `prompt=login`, `max_age`, and the
+  RFC 9207 `iss` authorization-response parameter.
+- One-use, client/redirect/PKCE-bound authorization codes.
+- Confidential clients using `client_secret_basic` or `client_secret_post`, plus
+  public clients using `none`; the POST form mode exists for current bdcmaps.
+- Registered-origin-only CORS for public browser clients on `/token`, `/userinfo`,
+  and `/revoke`; origins are derived from exact redirect registrations and are also
+  bound back to the specific public client on credential-bearing requests.
+- Signed access tokens and ID tokens, `/userinfo`, requested/client-allowed
+  `groups` and `roles` projection, and application permissions as OAuth scopes.
+- Opaque rotating refresh tokens, token-specific scope narrowing, current
+  user/client/permission re-evaluation, and whole-family revocation on replay.
+- RFC 7009-style refresh-token revocation and RP-initiated logout with exact
+  registered post-logout redirects.
+- Admin creation/editing of OIDC clients, exact redirect/logout URIs, allowed
+  identity/application scopes, MFA/refresh policy, access-token TTL, and one-time
+  client-secret creation/rotation.
+- Token refresh/replay/revocation audit events and server-side prevention of
+  granting the provider-only `system.admin` permission to an OAuth client.
 
-These are source implementation statements. The PostgreSQL paths still need the
-real integration gate described below; the authoring environment could not run it.
+The v0.4 identity functionality remains: one-time bootstrap, Argon2id passwords,
+local roles/permissions, provider sessions, password lifecycle, TOTP/recovery
+codes, audit, account UI, and transactionally rechecked administration.
 
 ## Dependencies and boundaries
 
-Only two direct external Go modules remain:
+Only two direct external Go modules are selected:
 
 ```text
 github.com/jackc/pgx/v5    PostgreSQL database/sql driver
 golang.org/x/crypto        Argon2id
 ```
 
-The HTTP and identity layers use standard-library interfaces. The executable
-registers pgx's SQL driver; `internal/db` owns SQL and transactions, not an ORM.
-There is no frontend package manager or external asset fetch. OIDC and future
-RADIUS/TACACS+ adapters consume the same identity model, with separate protocol
-registrations. No recoverable primary passwords or NT hashes were introduced.
+HTTP, JWT/JWK framing, PKCE, TOTP framing, and the identity/control layers use the
+standard library around those cryptographic/database primitives. There is no ORM,
+frontend package manager, Redis, message bus, or external policy service.
+
+OIDC and future RADIUS/TACACS+ adapters consume the same identity model but have
+separate protocol registrations. The canonical password remains a one-way Argon2id
+verifier; no recoverable primary password or NT hash is introduced for future AAA.
 
 ## Build and first use
 
 Use the project Go 1.25 toolchain (or a compatible newer version) and PostgreSQL.
-The package does not include downloaded dependencies or an invented `go.sum`.
-Resolve the pinned modules on a networked development machine, review and commit
-the resulting `go.mod`/`go.sum`, then build:
+Resolve the pinned modules on a networked development machine and review/commit the
+resulting `go.sum`:
 
 ```sh
 make deps
@@ -71,27 +84,33 @@ export AUTHD_MASTER_KEY_FILE="$PWD/authd-master.key"
 ./bin/authd
 ```
 
-`authd bootstrap` applies migrations, issues one token, and prints it to the local
-terminal. It does not create a user or print the token into the running daemon's
-logs. Open `http://127.0.0.1:8080/setup`, enter that token and the first account,
-then sign in at `/login`. Ordinary identity work happens in `/admin/`; personal
-credentials and sessions are at `/account`.
+`authd bootstrap` applies migrations and prints a one-time 30-minute setup token
+to the invoking terminal. Open `/setup`, create the initial administrator, then
+sign in at `/login`. Identity administration is under `/admin/`; personal
+credentials and sessions are under `/account`.
 
-The token expires after 30 minutes. Issuing another token invalidates earlier
-ones. Setup remains permanently closed after completion, even if an operator
-later removes all users. Keep the master key: changing or losing it invalidates
-CSRF proofs and makes existing encrypted authenticator seeds unreadable.
+Keep the master key. It encrypts TOTP seeds and OIDC signing private keys. Changing
+or losing it makes those encrypted values unreadable.
 
-Development mode requires both a loopback issuer and loopback listener. Outside
-development, an HTTPS reverse proxy must terminate TLS in front of authd's HTTP
-listener. The application does not implement direct TLS termination. Master-key
-files must be owner-only regular files. Do not use the development database
-password or disabled database TLS in production. Example settings are not loaded
-from `.env` automatically; use your shell or service manager.
+### Register bdcmaps
+
+After signing in as an administrator:
+
+1. Open **Clients**.
+2. Register a confidential client with client ID `bdcmaps`.
+3. Register the exact `https://<bdcmaps-origin>/auth/callback` redirect.
+4. Allow `openid`, `profile`, `email`, and `groups`.
+5. Copy the one-time secret into bdcmaps' existing `OIDC_CLIENT_SECRET` runtime
+   secret and configure its issuer/client/redirect settings.
+
+The current bdcmaps code sends the secret using `client_secret_post`; authd accepts
+that for compatibility. New clients should prefer `client_secret_basic` when their
+OIDC library supports it. See `docs/BDCMAPS_INTEGRATION.md`.
 
 ## Verification
 
-Full checks require **real dependencies and a marked disposable PostgreSQL DB**:
+Full qualification requires **real dependencies and a marked disposable
+PostgreSQL database**:
 
 ```sh
 export AUTHD_TEST_DISPOSABLE=1
@@ -99,53 +118,59 @@ export AUTHD_TEST_DATABASE_URL='postgres://authd:authd-dev-only@127.0.0.1:55432/
 make verify
 ```
 
-The database test creates and removes a unique `authd_it_*` schema, and ensures
-`pgcrypto` exists in `public`. Use only a disposable database; the explicit marker
-is required. Tests cover migration re-entry, bootstrap races, backend access
-checks, current grants, email verification, last-admin rollback, password-reset
-races, enrollment binding, OTP/recovery replay, and failed-transaction rollback.
-Missing test configuration is a failure, never a skip. The checked-in GitHub
-Actions workflow runs the same gate with PostgreSQL 18; it has not run merely
-because the YAML exists.
+The database suite creates and removes a unique `authd_it_*` schema. Missing test
+configuration is a failure, never a skip. In addition to the v0.4 identity cases,
+the integration source now covers client registration, durable authorization
+requests, one-use codes, refresh rotation/reuse-family revocation, token audit
+events, refusal of `system.admin` as an application scope, and signing-key
+rotation/retired-private-key destruction.
 
-`make offline-check` is an explicitly partial fallback: real stdlib-only unit and
-race tests, vet, bounded-hash-parser tests, and SQL-test-body typechecking. It does
-not replace the normal gate, build the executable, validate Argon2, or execute SQL.
-It uses no substitute modules. Details and actual local results: `VALIDATION.md`.
+`make offline-check` is deliberately partial. It runs the real stdlib-only unit,
+race and vet paths plus SQL integration-body typechecking, but it cannot replace a
+real pgx/Argon2 build or execute PostgreSQL transactions. The OIDC HTTP tests do
+exercise real RSA signing/JWK/JWT code and in-memory protocol persistence, including
+the bdcmaps-shaped `client_secret_post` + S256 flow. Details: `VALIDATION.md`.
 
 ## Current limits
 
-Administrative forms fail closed above 200 users, roles, or permissions rather
-than silently dropping assignments from a truncated list. Sessions/audit show the
-latest 200 rows. User/role/permission deletion, permission editing, client CRUD,
-MFA reset/recovery regeneration, QR generation, self-service profile edits,
-expired-row cleanup, trusted-proxy IP parsing, and application-session revocation
-propagation remain work items. Fresh sign-in (within ten minutes) is required for
-admin writes and MFA enrollment/removal. Rate limits are per process, not a
-multi-replica service. Proxy users currently share the proxy's IP rate bucket;
-forwarded headers are intentionally ignored.
+- Real PostgreSQL/dependency-backed qualification has not run in this authoring
+  environment, and actual bdcmaps interoperability remains an external gate.
+- There is no user consent screen; registered applications are trusted internal
+  clients and authorization is based on their configured scope allow-list.
+- Signing-key rotation is implemented in the service/store but does not yet have
+  an administrator button or automatic rotation schedule.
+- User/role/permission deletion, permission editing, pagination, optimistic admin
+  concurrency, administrative MFA reset, recovery-code regeneration, QR rendering,
+  profile self-editing, expired-row cleanup, and backup/master-key rotation remain.
+- JWT access tokens intentionally remain valid until their short expiry after a
+  user/session change; refresh and new authorization re-evaluate current grants.
+- Rate limits are process-local and deployments currently assume one active authd
+  instance. Forwarded IP headers are intentionally ignored until trusted-proxy
+  handling is explicit.
+- OIDC conformance-suite and independent third-party client coverage remain
+  qualification work; passing our protocol tests is not a conformance certificate.
 
 ## Next delivery
 
-Finish real PostgreSQL/dependency qualification, then implement signing keys,
-JWKS, authorization transactions and one-use code exchange. Preserve the existing
-`bdcmaps` requirements: PKCE S256, `client_secret_post`, and requested/client-allowed
-`groups` claims. Login compatibility is not the same as migrating bdcmaps' own
-role/session enforcement; see `docs/BDCMAPS_INTEGRATION.md`.
+Run the real Go 1.25 + pgx/x/crypto + PostgreSQL gate and exercise the actual
+`yellowman/bdcmaps` client. Fix any interoperability findings before adding RADIUS
+or TACACS+. RADIUS remains PAP-first unless a concrete device forces explicit
+legacy credential support.
 
 ## Repository map
 
 ```text
 cmd/authd/            server and explicit bootstrap command
 internal/identity/    identity service, contracts, validation, rate limits
-internal/password/    actual Argon2id verifier and bounded encoding parser
+internal/password/    Argon2id verifier and bounded encoding parser
 internal/cryptoutil/  random tokens, hashes, CSRF MAC, authenticated encryption
-internal/db/          PostgreSQL transactions, migrations, integration tests
+internal/db/          PostgreSQL repositories, migrations, integration tests
 internal/totp/        OTP encoding and verification
-internal/web/         real provider-operated forms and security middleware
-internal/oidc/        discovery and unimplemented protocol endpoints
+internal/web/         provider-operated forms and security middleware
+internal/oidc/        OIDC/OAuth protocol, JWT/JWK, tokens, client administration
 internal/protocol/    future AAA adapter boundary
 ```
 
-`SPEC.md` is the product contract. `TODO.md` separates delivered code from pending
-functionality. `DESIGN_LANGUAGE.md` defines the Liminal adaptation.
+`SPEC.md` is the product contract. `TODO.md` distinguishes implemented source from
+qualification and later operational work. `DESIGN_LANGUAGE.md` defines the adapted
+Liminal UI language.

@@ -94,6 +94,9 @@ func Load() (Config, error) {
 	if cfg.AccessTokenTTL <= 0 || cfg.AuthorizationCodeTTL <= 0 || cfg.SessionIdleTTL <= 0 || cfg.SessionAbsoluteTTL <= 0 || cfg.RefreshIdleTTL <= 0 || cfg.RefreshAbsoluteTTL <= 0 {
 		return Config{}, errors.New("all configured TTL values must be positive")
 	}
+	if cfg.AccessTokenTTL < 30*time.Second || cfg.AccessTokenTTL > time.Hour {
+		return Config{}, errors.New("access token TTL must be between 30 seconds and one hour")
+	}
 	if cfg.AuthorizationCodeTTL > time.Minute {
 		return Config{}, errors.New("authorization code TTL must not exceed 60 seconds")
 	}

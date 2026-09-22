@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.4
+## Specification v0.5
 
-Status: binding product design. v0.4 implements the local identity/admin slice; it does not complete the OIDC provider. See TODO.md and VALIDATION.md for implementation and qualification status.
+Status: binding product design. v0.5 implements the local identity/admin slice and the central OIDC provider path. See TODO.md and VALIDATION.md for remaining qualification and operations work.
 
 ## 1. Purpose
 
@@ -1196,9 +1196,9 @@ GET /logout?
 
 Post-logout redirect URI uses exact registered matching.
 
-Logout destroys the provider login session.
+Automatic RP-initiated logout requires a cryptographically valid `id_token_hint` identifying the same subject as the current provider session. A bare or cross-subject request MUST NOT destroy the current provider session. An otherwise-valid ID Token hint MAY remain usable after its `exp` time for a current/recent provider session, consistent with RP-Initiated Logout guidance.
 
-A request without trustworthy client/session context MUST NOT redirect to arbitrary destinations.
+When the provider session is already absent, a valid hint may still authorize idempotent redirection to that client's exactly registered post-logout URI. A request without trustworthy client/session context MUST NOT redirect to arbitrary destinations.
 
 Front-channel and back-channel RP logout propagation are deferred.
 
@@ -2122,12 +2122,17 @@ TACACS+ over TLS 1.3 / RFC 9887 when supported
 Where `authd` intentionally supports only a subset of optional protocol behavior, discovery metadata MUST describe the implemented subset accurately.
 
 
-# 45. v0.4 implementation limits and evidence
+# 45. v0.5 implementation limits and evidence
 
-This revision implements the identity/bootstrap/session/MFA/admin source slice.
-OIDC authorization/code/token/refresh/UserInfo/revocation/RP-logout operations
-remain unavailable and return 501. Discovery metadata remains a preview of the
-product contract, not certification of those endpoints.
+This revision implements the identity/bootstrap/session/MFA/admin source slice and
+the central OIDC/OAuth provider path: discovery/JWKS, Authorization Code with PKCE
+S256, durable browser continuations, one-use authorization codes, RS256 ID/access
+tokens, UserInfo, rotating refresh families with replay revocation, token
+revocation, RP-initiated logout, and administrator-managed OIDC clients.
+
+This implementation status is not a conformance or production claim. The authoring
+environment has not executed the real pgx/Argon2 build against PostgreSQL and has
+not run the actual private bdcmaps application or an independent OIDC test suite.
 
 The local identity implementation uses `database/sql` with the actual pgx driver
 registered by the executable; the dependency policy is unchanged. The direct

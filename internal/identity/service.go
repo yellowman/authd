@@ -195,6 +195,14 @@ func (s *Service) Session(ctx context.Context, raw string) (Session, error) {
 	}
 	return s.Store.Session(ctx, Hash(raw), s.idle)
 }
+func (s *Service) EndSession(ctx context.Context, raw string, a Audit) error {
+	sess, err := s.Session(ctx, raw)
+	if err != nil {
+		return err
+	}
+	return s.Store.RevokeSession(ctx, Hash(raw), sess.ID, false, a)
+}
+
 func (s *Service) ValidCSRF(session Session, raw, form string) bool {
 	return cryptoutil.ValidToken(form) && hmac.Equal(Hash(form), session.CSRFHash) && hmac.Equal([]byte(s.CSRF(raw, "session")), []byte(form))
 }

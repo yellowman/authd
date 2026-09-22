@@ -51,3 +51,16 @@ func TestLifecycleMigrationRetainsBootstrapAndTriggerGuards(t *testing.T) {
 		}
 	}
 }
+
+func TestOIDCMigrationAddsDurableContinuationsAndRefreshContext(t *testing.T) {
+	body, err := migrationFS.ReadFile("migrations/003_oidc_authorization.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(body)
+	for _, marker := range []string{"CREATE TABLE authorization_requests", "request_hash bytea PRIMARY KEY", "ADD COLUMN auth_methods", "ADD COLUMN scopes"} {
+		if !strings.Contains(sql, marker) {
+			t.Fatalf("missing OIDC migration guard %q", marker)
+		}
+	}
+}

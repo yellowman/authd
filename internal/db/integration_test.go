@@ -84,7 +84,7 @@ func postgres(t *testing.T) (*db.IdentityStore, context.Context) {
 		t.Fatal("idempotent migration:", err)
 	}
 	var n int
-	if err = conn.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 2 {
+	if err = conn.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 3 {
 		t.Fatalf("migration count %d: %v", n, err)
 	}
 	return &db.IdentityStore{DB: conn}, ctx

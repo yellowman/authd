@@ -27,12 +27,14 @@ Before adding a dependency, document why the standard library or an existing dep
 Until a project-specific security mailbox is established, report issues privately to the repository owner rather than filing a public issue containing exploit details.
 
 
-## v0.4 operational status
+## v0.5 operational status
 
-This is unqualified identity source, not a production OIDC release. Do not expose
-it to production traffic before completing the real dependency and PostgreSQL
-gates in VALIDATION.md. Offline unit doubles test orchestration, not password-KDF
-or SQL correctness. No module replacements count as release evidence.
+OIDC issuance is implemented in source, but this is not yet a production-qualified
+identity service. Do not expose it to production traffic before completing the real
+dependency/PostgreSQL gates and an independent interoperability review described in
+VALIDATION.md. Local OIDC tests exercise real RSA/JWT/JWK/PKCE code with an in-memory
+store; they do not prove PostgreSQL behavior or protocol conformance. No module
+replacement counts as release evidence.
 
 Keep master-key files owner-only. Use loopback-only development mode; production
 uses an HTTPS reverse proxy and authenticated PostgreSQL TLS. Forwarded IP headers

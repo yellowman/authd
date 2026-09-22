@@ -21,6 +21,7 @@ import (
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/identity"
 	"github.com/yellowman/authd/internal/oidc"
+	"github.com/yellowman/authd/internal/requestid"
 )
 
 //go:embed templates/*.html static/*
@@ -34,17 +35,21 @@ type Server struct {
 	oidc        *oidc.HTTP
 }
 type pageData struct {
-	Title, Issuer, Section, View, CSRF, Error, Notice, ReturnTo, Secret, URI string
-	Development                                                              bool
-	Session                                                                  identity.Session
-	Admin                                                                    identity.AdminData
-	Sessions                                                                 []identity.Session
-	SelectedUser                                                             *identity.User
-	SelectedRole                                                             *identity.Role
-	RecoveryCodes                                                            []string
+	Title, Issuer, Section, View, CSRF, Error, Notice, ReturnTo, Secret, URI, ClientName, LoginHint, OIDCRequest string
+	Development                                                                                                  bool
+	Session                                                                                                      identity.Session
+	Admin                                                                                                        identity.AdminData
+	Sessions                                                                                                     []identity.Session
+	SelectedUser                                                                                                 *identity.User
+	SelectedRole                                                                                                 *identity.Role
+	OIDCClients                                                                                                  []oidc.Client
+	SelectedClient                                                                                               *oidc.Client
+	ClientSecret                                                                                                 string
+	RecoveryCodes                                                                                                []string
+	DefaultAccessTokenTTL                                                                                        int64
 }
 
-func New(cfg config.Config, auth *identity.Service, health func(context.Context) error) (*Server, error) {
+func New(cfg config.Config, auth *identity.Service, health func(context.Context) error, providers ...*oidc.HTTP) (*Server, error) {
 	if auth == nil || health == nil {
 		return nil, errors.New("identity service and health check are required")
 	}
@@ -58,11 +63,19 @@ func New(cfg config.Config, auth *identity.Service, health func(context.Context)
 			return false
 		},
 		"when": func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") },
+		"list": func(values ...string) []string { return values },
 	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	return &Server{cfg: cfg, auth: auth, healthCheck: health, templates: tmpl, oidc: oidc.NewHTTP(cfg.Issuer)}, nil
+	var provider *oidc.HTTP
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
+	if provider == nil {
+		provider = oidc.NewHTTP(nil, cfg.Issuer, cfg.Development)
+	}
+	return &Server{cfg: cfg, auth: auth, healthCheck: health, templates: tmpl, oidc: provider}, nil
 }
 func (s *Server) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
@@ -91,6 +104,9 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /admin/users/password", s.resetPassword)
 	mux.HandleFunc("POST /admin/roles/save", s.saveRole)
 	mux.HandleFunc("POST /admin/permissions/create", s.createPermission)
+	mux.HandleFunc("POST /admin/clients/create", s.createClient)
+	mux.HandleFunc("POST /admin/clients/save", s.saveClient)
+	mux.HandleFunc("POST /admin/clients/secret", s.rotateClientSecret)
 	mux.HandleFunc("POST /admin/sessions/revoke", s.revokeSession)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/account", http.StatusSeeOther) })
 	return s.securityHeaders(s.requestLog(mux)), nil
@@ -108,7 +124,11 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 func (s *Server) data(title string) pageData {
-	return pageData{Title: title, Issuer: s.cfg.Issuer, Development: s.cfg.Development}
+	ttl := s.cfg.AccessTokenTTL
+	if ttl < 30*time.Second || ttl > time.Hour {
+		ttl = 5 * time.Minute
+	}
+	return pageData{Title: title, Issuer: s.cfg.Issuer, Development: s.cfg.Development, DefaultAccessTokenTTL: int64(ttl.Seconds())}
 }
 func (s *Server) render(w http.ResponseWriter, status int, name string, data pageData) {
 	var b bytes.Buffer
@@ -224,7 +244,7 @@ func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) error {
 		return identity.Invalid("invalid or oversized form")
 	}
 	for name, values := range r.PostForm {
-		if name != "roles" && name != "permissions" && len(values) != 1 {
+		if name != "roles" && name != "permissions" && name != "identity_scopes" && len(values) != 1 {
 			return identity.Invalid("duplicate form field")
 		}
 	}
@@ -277,10 +297,12 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request, admin, allowForced
 	return session, raw, true
 }
 func safeReturn(path string) string {
-	if path == "/admin/" {
-		return "/admin/"
+	switch path {
+	case "/admin/", "/authorize":
+		return path
+	default:
+		return "/account"
 	}
-	return "/account"
 }
 func auditInfo(w http.ResponseWriter, r *http.Request) identity.Audit {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -313,7 +335,8 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("X-Request-ID", id)
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		ctx := requestid.With(r.Context(), id)
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		start := time.Now()
 		next.ServeHTTP(w, r.WithContext(ctx))

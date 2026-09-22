@@ -134,7 +134,7 @@ A new dependency needs a specific reason. Preference order:
 The starter uses only pgx and x/crypto.
 
 
-## v0.4 commit boundaries
+## v0.5 commit boundaries
 
 A short transaction-scoped advisory lock serializes identity mutations. Session
 and admin guards are re-evaluated in that transaction. Password hashing occurs
@@ -145,5 +145,8 @@ sessions and refresh families before commit. Live session reads re-resolve roles
 and permissions; no long-lived cached administrator grant is used.
 
 Bootstrap is an explicit one-time local command plus web form, closed by permanent
-installation state. OIDC issuance is still the next protocol slice. The internal
-Store contract is not a public SDK or a multi-backend database abstraction.
+installation state. OIDC issuance now uses durable server-side authorization
+continuations, one-use codes, PKCE S256, encrypted RSA signing keys, short-lived
+JWT access/ID tokens, and rotating opaque refresh families. Protocol state is
+kept in the OIDC store; identity/session authority stays in the identity core.
+The internal Store contracts are not public SDKs or multi-backend abstractions.

@@ -16,6 +16,7 @@ import (
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/db"
 	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/oidc"
 	"github.com/yellowman/authd/internal/password"
 	webserver "github.com/yellowman/authd/internal/web"
 )
@@ -61,7 +62,15 @@ func run() error {
 		fmt.Fprintln(os.Stdout, token)
 		return nil
 	}
-	app, err := webserver.New(cfg, service, pool.PingContext)
+	oidcService, err := oidc.NewService(&db.OIDCStore{DB: pool}, service, cfg.Issuer, cfg.MasterKey, cfg.AuthorizationCodeTTL, cfg.RefreshIdleTTL, cfg.RefreshAbsoluteTTL)
+	if err != nil {
+		return err
+	}
+	if err = oidcService.EnsureSigningKey(ctx); err != nil {
+		return err
+	}
+	provider := oidc.NewHTTP(oidcService, cfg.Issuer, cfg.Development)
+	app, err := webserver.New(cfg, service, pool.PingContext, provider)
 	if err != nil {
 		return err
 	}
