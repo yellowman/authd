@@ -51,6 +51,7 @@ func TestOperatorHelpRendersAcrossSections(t *testing.T) {
 	for view, text := range map[string]string{
 		"users":       "Users are people, not applications.",
 		"roles":       "A role is a bundle you assign to people.",
+		"groups":      "A group grants its roles to its members.",
 		"permissions": "A permission names an operation the app understands.",
 		"sessions":    "These are sign-ins at authd, not every app’s session.",
 		"audit":       "Audit records show what authd did.",
@@ -66,6 +67,32 @@ func TestOperatorHelpRendersAcrossSections(t *testing.T) {
 	h.ServeHTTP(w, request(s, m, "GET", "/admin/?user="+userID, nil, true))
 	if w.Code != 200 || strings.Contains(w.Body.String(), "<script>") || !strings.Contains(w.Body.String(), "Subject (<code>sub</code>)") {
 		t.Fatal("subject/help must render without trusting profile HTML")
+	}
+}
+
+func TestGroupAccessPresentation(t *testing.T) {
+	s, h, m := fixture(t, true)
+	m.snapshot.Users[0].Groups = []string{"network.operations"}
+	m.snapshot.Users[0].EffectiveRoles = []string{"network.operator"}
+	m.snapshot.Groups = []identity.Group{{ID: "00000000-0000-4000-8000-000000000002", Name: "network.operations", RoleIDs: []string{userID}, UserIDs: []string{userID}, Roles: []string{"network.operator"}}}
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"/admin/?view=users", []string{"Effective roles: network.operator", "Direct: None", "Groups: network.operations"}},
+		{"/admin/?view=groups", []string{"Roles granted", "network.operator", "A group grants its roles to its members."}},
+		{"/admin/?group=00000000-0000-4000-8000-000000000002", []string{"Deleting this group removes its membership and group-derived role grants", "Already-issued access tokens remain valid until expiry"}},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, request(s, m, "GET", tc.path, nil, true))
+		if w.Code != 200 {
+			t.Fatalf("%s: %d: %s", tc.path, w.Code, w.Body.String())
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(w.Body.String(), want) {
+				t.Errorf("%s missing %q", tc.path, want)
+			}
+		}
 	}
 }
 

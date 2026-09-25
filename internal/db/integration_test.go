@@ -230,6 +230,21 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	role := findRole(t, data, "bdcmaps.operator")
 	user := findUser(t, data, "alice")
 	require(t, s.SaveGroup(ctx, actor.TokenHash, identity.GroupEdit{Name: "network.operations", RoleIDs: []string{role.ID}, UserIDs: []string{user.ID}}, auditFixture))
+	data, err = s.AdminData(ctx, actor.TokenHash)
+	require(t, err)
+	user = findUser(t, data, "alice")
+	if len(user.Roles) != 0 || len(user.Groups) != 1 || user.Groups[0] != "network.operations" || len(user.EffectiveRoles) != 1 || user.EffectiveRoles[0] != "bdcmaps.operator" {
+		t.Fatalf("admin access summary omits or mislabels inherited roles: %#v", user)
+	}
+	groupFound := false
+	for _, group := range data.Groups {
+		if group.Name == "network.operations" {
+			groupFound = len(group.Roles) == 1 && group.Roles[0] == "bdcmaps.operator"
+		}
+	}
+	if !groupFound {
+		t.Fatal("group admin summary omits its granted role")
+	}
 	rec, err := s.LoginRecord(ctx, "alice")
 	require(t, err)
 	userSession := sessionFixture(t, rec, "pwd")

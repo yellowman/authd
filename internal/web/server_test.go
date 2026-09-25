@@ -41,6 +41,7 @@ type testStore struct {
 	loginAudit                                identity.Audit
 	loginSession                              identity.Session
 	snapshot                                  identity.AdminData
+	groupEdit                                 identity.GroupEdit
 }
 
 func (m *testStore) BootstrapOpen(context.Context) (bool, error) { return true, nil }
@@ -73,6 +74,11 @@ func (m *testStore) DeletePermission(context.Context, []byte, string, identity.A
 	return nil
 }
 func (m *testStore) DeleteRole(context.Context, []byte, string, identity.Audit) error {
+	m.mutationCalls++
+	return nil
+}
+func (m *testStore) SaveGroup(_ context.Context, _ []byte, edit identity.GroupEdit, _ identity.Audit) error {
+	m.groupEdit = edit
 	m.mutationCalls++
 	return nil
 }
@@ -156,6 +162,27 @@ func request(s *Server, m *testStore, method, path string, values url.Values, au
 		r.AddCookie(&http.Cookie{Name: s.cookieName("session"), Value: m.raw})
 	}
 	return r
+}
+func TestParseFormAcceptsGroupMembersButRejectsDuplicateScalar(t *testing.T) {
+	s, _, m := fixture(t, true)
+	values := url.Values{"users": {userID, "00000000-0000-4000-8000-000000000002"}, "name": {"Operators"}}
+	if err := s.parseForm(httptest.NewRecorder(), request(s, m, http.MethodPost, "/admin/groups/save", values, true)); err != nil {
+		t.Fatalf("group members rejected: %v", err)
+	}
+	values["name"] = []string{"Operators", "Admins"}
+	if err := s.parseForm(httptest.NewRecorder(), request(s, m, http.MethodPost, "/admin/groups/save", values, true)); err == nil {
+		t.Fatal("duplicate scalar field accepted")
+	}
+}
+func TestGroupSaveAcceptsMultipleMembers(t *testing.T) {
+	s, handler, m := fixture(t, true)
+	members := []string{userID, "00000000-0000-4000-8000-000000000002"}
+	values := url.Values{"name": {"networkmap.operators"}, "users": members, "csrf_token": {s.auth.CSRF(m.raw, "session")}}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request(s, m, http.MethodPost, "/admin/groups/save", values, true))
+	if w.Code != http.StatusSeeOther || m.mutationCalls != 1 || len(m.groupEdit.UserIDs) != 2 || m.groupEdit.UserIDs[0] != members[0] || m.groupEdit.UserIDs[1] != members[1] {
+		t.Fatalf("group save: status=%d, mutations=%d, members=%v", w.Code, m.mutationCalls, m.groupEdit.UserIDs)
+	}
 }
 func TestAnonymousCannotReadAccountOrAdmin(t *testing.T) {
 	s, h, m := fixture(t, false)

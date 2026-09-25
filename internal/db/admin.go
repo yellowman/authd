@@ -26,6 +26,10 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		rows, e := tx.QueryContext(ctx, `SELECT `+userColumns+`,
  COALESCE((SELECT json_agg(ur.role_id::text ORDER BY ur.role_id) FROM user_roles ur WHERE ur.user_id=u.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text,
+ COALESCE((SELECT json_agg(g.name ORDER BY g.name) FROM user_groups ug JOIN groups g ON g.id=ug.group_id WHERE ug.user_id=u.id),'[]'::json)::text,
+ COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM roles r WHERE r.id IN
+   (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id=u.id
+    UNION SELECT gr.role_id FROM user_groups ug JOIN group_roles gr ON gr.group_id=ug.group_id WHERE ug.user_id=u.id)),'[]'::json)::text,
  EXISTS(SELECT 1 FROM totp_credentials t WHERE t.user_id=u.id)
  FROM users u WHERE u.deleted_at IS NULL ORDER BY lower(u.username) LIMIT 200`)
 		if e != nil {
@@ -33,8 +37,8 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		}
 		for rows.Next() {
 			var u identity.User
-			var ids, names string
-			args := append(userDest(&u), &ids, &names, &u.MFAEnabled)
+			var ids, names, groups, effectiveRoles string
+			args := append(userDest(&u), &ids, &names, &groups, &effectiveRoles, &u.MFAEnabled)
 			if e = rows.Scan(args...); e != nil {
 				rows.Close()
 				return e
@@ -44,6 +48,14 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 				return e
 			}
 			if u.Roles, e = decodeList(names); e != nil {
+				rows.Close()
+				return e
+			}
+			if u.Groups, e = decodeList(groups); e != nil {
+				rows.Close()
+				return e
+			}
+			if u.EffectiveRoles, e = decodeList(effectiveRoles); e != nil {
 				rows.Close()
 				return e
 			}
@@ -85,15 +97,16 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		}
 		rows, e = tx.QueryContext(ctx, `SELECT g.id::text,g.name,g.description,g.updated_at,
  COALESCE((SELECT json_agg(gr.role_id::text ORDER BY gr.role_id) FROM group_roles gr WHERE gr.group_id=g.id),'[]'::json)::text,
- COALESCE((SELECT json_agg(ug.user_id::text ORDER BY ug.user_id) FROM user_groups ug WHERE ug.group_id=g.id),'[]'::json)::text
+ COALESCE((SELECT json_agg(ug.user_id::text ORDER BY ug.user_id) FROM user_groups ug WHERE ug.group_id=g.id),'[]'::json)::text,
+ COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM group_roles gr JOIN roles r ON r.id=gr.role_id WHERE gr.group_id=g.id),'[]'::json)::text
  FROM groups g ORDER BY g.name LIMIT 200`)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
 			var group identity.Group
-			var roleIDs, userIDs string
-			if e = rows.Scan(&group.ID, &group.Name, &group.Description, &group.UpdatedAt, &roleIDs, &userIDs); e != nil {
+			var roleIDs, userIDs, roleNames string
+			if e = rows.Scan(&group.ID, &group.Name, &group.Description, &group.UpdatedAt, &roleIDs, &userIDs, &roleNames); e != nil {
 				rows.Close()
 				return e
 			}
@@ -102,6 +115,10 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 				return e
 			}
 			if group.UserIDs, e = decodeList(userIDs); e != nil {
+				rows.Close()
+				return e
+			}
+			if group.Roles, e = decodeList(roleNames); e != nil {
 				rows.Close()
 				return e
 			}

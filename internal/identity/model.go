@@ -16,6 +16,8 @@ type User struct {
 	MFAEnabled          bool
 	RoleIDs             []string
 	Roles               []string
+	Groups              []string
+	EffectiveRoles      []string
 }
 
 type Role struct {
@@ -32,6 +34,7 @@ type Group struct {
 	ID, Name, Description string
 	UpdatedAt             time.Time
 	RoleIDs, UserIDs      []string
+	Roles                 []string
 }
 
 type Permission struct {

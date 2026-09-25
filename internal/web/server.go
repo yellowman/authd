@@ -308,7 +308,7 @@ func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) error {
 		return identity.Invalid("invalid or oversized form")
 	}
 	for name, values := range r.PostForm {
-		if name != "roles" && name != "permissions" && name != "identity_scopes" && len(values) != 1 {
+		if name != "roles" && name != "users" && name != "permissions" && name != "identity_scopes" && len(values) != 1 {
 			return identity.Invalid("duplicate form field")
 		}
 	}

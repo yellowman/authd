@@ -4,6 +4,8 @@
 <h2>Users are people, not applications.</h2><p>Create one account per person, then assign roles. A user can sign in with no roles; the application still decides whether that identity has access. You do not create another password for each app.</p>
 {{else if eq .View "roles"}}
 <h2>A role is a bundle you assign to people.</h2><p>An app may map a role's exact name from <code>groups</code> or <code>roles</code>, or check the permissions bundled in it. A role may have no permissions. After saving a role, <a href="/admin/?view=users">assign it to users</a>.</p><p><code>system-admin</code> controls authd, not every application. Use app-qualified names such as <code>inventory-viewer</code> for application roles.</p>
+{{else if eq .View "groups"}}
+<h2>A group grants its roles to its members.</h2><p>Select roles and members, then save. Members receive the union of direct roles and roles from all their groups. A group name alone grants nothing. After saving, review each member's effective roles in <a href="/admin/?view=users">Users</a>.</p>
 {{else if eq .View "permissions"}}
 <h2>A permission names an operation the app understands.</h2><p>Creating <code>inventory.items.read</code> does not teach an app to authorize it. The application must implement the check. Skip this section for identity-only or groups-only integrations.</p><p>For a scope-aware app: create the agreed permission, include it in a role, assign that role, allow the scope on the client, and have the app request and check it. Missing user permission denies the request.</p>
 {{else if eq .View "clients"}}
