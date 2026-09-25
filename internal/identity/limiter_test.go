@@ -24,15 +24,31 @@ func TestLimiterRefillAndMemoryBound(t *testing.T) {
 	if !l.Allow("one", 3, time.Minute) {
 		t.Fatal("no refill")
 	}
-	if !l.Allow("two", 3, time.Minute) || l.Allow("three", 3, time.Minute) {
-		t.Fatal("unbounded limiter")
+	if !l.Allow("two", 3, time.Minute) || !l.Allow("three", 3, time.Minute) {
+		t.Fatal("new identity denied by saturated limiter")
 	}
-	now = now.Add(2 * time.Hour)
-	if !l.Allow("three", 3, time.Minute) {
-		t.Fatal("idle buckets not collected")
+	if len(l.entries) != 2 || l.entries["one"] != nil {
+		t.Fatal("least recently used bucket was not evicted")
 	}
 	if len(l.entries) > 2 {
 		t.Fatal("memory bound exceeded")
+	}
+}
+func TestLimiterKeepsHotBucketDuringIdentityFlood(t *testing.T) {
+	l := NewLimiter(2)
+	if !l.Allow("ip:known", 1, time.Hour) || !l.Allow("user:first", 1, time.Hour) {
+		t.Fatal("initial allowance failed")
+	}
+	for i := 0; i < 100; i++ {
+		if l.Allow("ip:known", 1, time.Hour) {
+			t.Fatal("hot IP bypassed limit")
+		}
+		if !l.Allow(fmt.Sprintf("user:%d", i), 1, time.Hour) {
+			t.Fatal("new identity denied during churn")
+		}
+	}
+	if len(l.entries) != 2 {
+		t.Fatal("memory cap exceeded")
 	}
 }
 func TestLimiterConcurrentBurst(t *testing.T) {
