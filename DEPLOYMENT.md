@@ -25,9 +25,9 @@ explicit owner-credential step rather than an install-time side effect.
 
 ## After installation: operating the application
 
-Installation gets the service running; it does not connect BDC or assign users.
+Installation gets the service running; it does not connect an application or assign users.
 Open **Administration → Start here**, or read [OPERATOR_GUIDE.md](OPERATOR_GUIDE.md)
-for roles, client registration, which values belong in BDC, MFA, and daily changes.
+for groups, roles, client registration, application-side settings, MFA, and daily changes.
 You do not need to repeat PostgreSQL bootstrap when adding a person/application.
 
 ## 1. Trust boundaries
@@ -544,12 +544,19 @@ path, query, or fragment.
 
 ## 12. Register relying parties
 
-Use the authd admin UI to create OIDC clients. Each client gets exact redirect
-and post-logout URIs plus explicit identity/application-scope allow-lists.
+Create OIDC clients in the authd admin UI, or use discovery-advertised Dynamic
+Client Registration with a one-use, prefix-limited initial token. Each client
+gets exact redirect URIs and explicit scope allow-lists. Dynamic registration
+can create app-prefixed permissions and optional, initially unassigned role/group
+templates; it does not give users access. Dynamic clients currently support
+confidential code/PKCE login without refresh tokens. See
+`docs/APP_CREATOR_OIDC.md` for registration and management details.
 
-For `bdcmaps`, see `docs/BDCMAPS_INTEGRATION.md`. For the general `(iss, sub)`,
-local-authority, ACR, and `sid` integration contract, see
-`docs/RP_INTEGRATION.md`.
+For a reusable end-to-end application integration, see
+`docs/APPLICATION_INTEGRATION.md`; for the exact registration protocol, see
+`docs/APP_CREATOR_OIDC.md`. The `(iss, sub)`, local-authority, ACR, and `sid`
+contract is in `docs/RP_INTEGRATION.md`. Each application owns its specific
+deployment instructions.
 
 ## 13. Updating an existing installation
 

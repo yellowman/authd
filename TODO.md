@@ -1,4 +1,11 @@
-# Current follow-through — v0.9.4
+# Current follow-through
+
+- [x] Dynamic Client Registration with app-prefixed permission creation and
+  optional unassigned role/group templates.
+- [x] Administrative groups that assign roles to members; direct and group
+  roles combine for effective permission evaluation.
+- [ ] Qualify the current BDC access-token-scope cutover end to end; the
+  2026-09-22 BDC PASS below belongs to the older role-claim flow.
 
 - [x] Generic Markdown-driven adding-an-app workflow, separate application profiles.
 - [x] Administrator-only catalog, renderer, full-text search, TOC and original source.

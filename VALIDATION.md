@@ -7,6 +7,11 @@ cryptography, listeners, dependency locks and native service definitions are
 unchanged. The existing first-real-application PASS below remains valid as
 reported; this interface update does not claim a new deployed-app test.
 
+**Current scope boundary:** the 2026-09-22 BDC login PASS used the former
+role-claim integration. It does not verify BDC's later access-token-scope
+cutover, Dynamic Client Registration, group-derived grants, or current
+restricted-user behavior. Those require separate end-to-end qualification.
+
 ## First real application — bdcmaps: PASS
 
 **One complete end-to-end application login is now verified.** On 2026-09-22 the

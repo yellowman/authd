@@ -13,8 +13,8 @@ Choose the model supported by the application, not whichever has the most fields
 | App integration | What to set up in authd | What remains in the app |
 |---|---|---|
 | Identity only | A user and a client; start with `openid profile email`. No roles are needed just to prove identity. | Admission, membership and all permissions. |
-| Roles / groups | Named roles assigned to users. Allow `groups` (or `roles`) and make the app request it. | A one-time mapping from each incoming role name to what it means in that app, plus local membership checks. |
-| Permission scopes | Permissions the app actually checks, bundled in roles and assigned to users. Allow those scopes on the client. | Requests and checks for those scopes, plus ownership, tenant and resource checks. |
+| Legacy role-name claims | Named roles assigned directly or through authd groups. Allow `groups` (or `roles`) and make the app request it. These claims contain **role names**, not group names. | A mapping from each incoming role name to what it means in that app, plus local membership checks. |
+| Permission scopes | Permissions the app actually checks, bundled in roles and assigned directly or through groups. Allow those scopes on the client. | Requests and checks for granted scopes, plus ownership, tenant and resource checks. |
 
 These can be combined. A tenant-aware application normally keeps its tenant
 membership even when authd supplies shared permissions.
@@ -50,19 +50,21 @@ Leave permission checkboxes empty when the app uses role-name mapping only.
 The exact role name is what the app receives; the description is for operators.
 
 Open [Users](/admin/?view=users), create or select a person, and assign the intended
-role. Merely creating a role does not assign it. Supply an email if the app requires
+role directly. Alternatively, create a group in [Groups](/admin/?view=groups),
+put the role in that group, and add the person as a member. Several groups and
+direct roles combine; merely creating a role or group assigns nobody. Supply an email if the app requires
 one. Give an initial password through a trusted channel; authd sends no invitation
 email. With **Require password change** selected, the person must change it on
 Account before returning to the app.
 
 For a permission-scope integration, first create only the agreed operation names
 in [Permissions](/admin/?view=permissions), for example `inventory.items.read`.
-Add them to the relevant role, then assign that role to people. Inventing a
+Add them to the relevant role, then assign that role to people directly or through a group. Inventing a
 permission name here does not implement a permission check in the app.
 
 ## 4. Register the application
 
-Open [Clients](/admin/?view=clients) and complete the registration:
+For an operator-created client, open [Clients](/admin/?view=clients) and complete the registration:
 
 | Field | What to enter |
 |---|---|
@@ -81,6 +83,15 @@ Open [Clients](/admin/?view=clients) and complete the registration:
 See the [field reference](FIELD_REFERENCE.md) for more detail. Saving a client
 registers it here; it does not configure or test the application.
 
+Alternatively, an app creator can use discovery-advertised **Dynamic Client
+Registration** with an administrator-issued, one-use, prefix-limited token.
+The standard `scope` metadata registers its allowed scopes; authd interprets
+app-prefixed scopes as catalog permissions. Optional authd-specific role and
+group templates create unassigned access bundles. This path currently supports
+confidential code/PKCE clients without refresh tokens. Follow
+[Building an OIDC client](APP_CREATOR_OIDC.md) for the exact request and the
+boundary between standard protocol and authd extensions.
+
 ## 5. Configure the application side
 
 After saving a confidential client, copy the **one-time client secret** into the
@@ -95,8 +106,10 @@ PKCE S256.
 
 **Allowed, requested and granted are different:** the client's checkboxes permit
 requests. The app must actually request the scopes; the user must also have any
-requested application permission. If the user lacks a requested permission,
-authorization fails. Do not request every admin permission for an ordinary viewer.
+application permission it receives. A manually created client rejects an
+authorization request when the user lacks a requested application permission;
+a dynamically registered client returns only the requested permissions that
+user holds. The app must check the **granted** access-token scopes either way.
 
 For role-name integrations, configure the app's group-to-role mappings. For
 existing accounts, link the exact **issuer + subject (`sub`)** deliberately. Never
@@ -122,7 +135,7 @@ An enabled user with no roles can authenticate to an identity-only client. There
 is **no separate per-client allowed-users list** in this release. The app must
 apply its own admission policy or require an implemented permission scope.
 
-Clients allowed to request `groups` or `roles` can receive all assigned authd role
+Clients allowed to request `groups` or `roles` can receive all effective authd role
 names for that person, not just names prefixed with the app's name. Do not release
 those claims to an app that should not see them.
 
@@ -137,8 +150,8 @@ other identity providers directly. authd need not own every customer identity.
 | Form refused before saving | Reload through authd's public address; check Origin, proxy headers and CSRF. Do not disable these checks. |
 | Admin page opens but save is denied | Privileged writes require a sign-in within the last 10 minutes. Sign in again and reopen the form. |
 | Invalid client / callback | Compare client ID, secret and exact registered callback on both sides. |
-| Invalid scope / access denied | Check client allow-lists, requested scopes and the user's role permissions. |
-| Sign-in returns but access is wrong | Check the app's role mappings, memberships and default role. Test with a new app session. |
+| Invalid scope / access denied | Check client allow-lists, requested scopes, effective role permissions and consent. Dynamic clients may receive a narrower grant. |
+| Sign-in returns but access is wrong | Check granted scopes and the app's resource/admission checks; for a legacy role-claim client, check role mappings. Test with a new app session. |
 | MFA required but no code is available | Enroll an authenticator on Account or use a remaining recovery code. Resetting MFA does not satisfy an MFA requirement. |
 | Disabled here but still signed in there | The app may retain its own cookie. Revoke its local sessions too; back-channel logout is not implemented. |
 | Service unavailable / error reference | Correlate the timestamp and request reference with daemon/proxy logs. Keep credentials and token-bearing URLs out of tickets. |

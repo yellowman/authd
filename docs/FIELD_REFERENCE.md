@@ -12,24 +12,34 @@ the details in one place. Nothing here changes the protocol or grants access.
 | Display name | A human-readable name exposed through `profile`; not a sign-in name or identifier. |
 | Email | Optional to authd, but required by some apps. `email` scope controls release. |
 | Initial / new password | Used only at authd. At least 12 characters, with no mandatory composition rules. Distribute an initial password through a trusted channel. |
-| Assigned roles | Shared role membership. A role may be used as a group name by an app or may bundle permission scopes. Creating a role alone assigns nobody. |
+| Direct roles | Roles assigned on this user form. Group-derived roles are shown as effective roles but are managed in Groups. Creating a role alone assigns nobody. |
 | Account enabled | Disabling blocks authentication and revokes authd sessions and refresh grants. An app's independent cookie may survive until that app revokes it. |
 | Email verified | An explicit administrator assertion, not a checkbox to make login work. Changing the email clears it; authd sends no verification mail. |
 | Require password change | The person must set their own password on Account before using apps or administration. |
 | Issuer and subject (`sub`) | Stable external identity pair for deliberate account linking. These are identifiers, not credentials. Do not link by email alone. |
 
-## Roles and permissions
+## Groups, roles and permissions
+
+Groups are reusable user-to-role assignments. In **Groups**, select the group's
+roles and member users. A person can belong to several groups and have direct
+roles; their effective roles are the union. Removing a member or role removes
+that source of access at the next grant evaluation. An existing application
+session or already-issued access token may remain valid until its own expiry.
+Group names are administrative labels; the OIDC `groups` claim contains
+**effective role names**, not these labels. Groups cannot contain other groups.
 
 | Field | Meaning and effect |
 |---|---|
 | Role name | Exact name exposed in `groups` / `roles`. Prefer app-qualified names. Renaming a role can break app-side mappings. |
 | Role description | Operator explanation only. It is not sent as a role name and has no permission effect. |
-| Included permissions | Operations bundled by this role. Empty is normal for a groups-only integration. |
+| Included permissions | Operations bundled by this role. Empty is possible for a legacy role-name-claim integration. |
 | Permission name | Exact operation scope the app implements and checks, such as `inventory.items.read`. Names are case-sensitive; use lowercase. |
 | Permission description | Explain the operation to other operators. The text does not implement access control. |
 
 `system-admin` contains `system.admin` and administers authd itself. Do not use it
 as an application's ordinary administrator role or request it as an app scope.
+Keep at least one enabled user with this role assigned directly; the
+last-administrator safeguard is based on direct assignments.
 Permissions cannot be assigned directly to a user; assign the role containing them.
 
 ## Clients
@@ -55,14 +65,17 @@ Permissions cannot be assigned directly to a user; assign the role containing th
 | `openid` | OpenID Connect authentication and the stable subject. |
 | `profile` | Profile fields such as display name and sign-in username. |
 | `email` | Email address and its actual verification state, when an address exists. |
-| `groups` | The person's assigned authd role names under the conventional `groups` claim. |
-| `roles` | The same role membership under `roles`; not another role directory. |
+| `groups` | The person's effective authd role names under the conventional `groups` claim; not authd group names. |
+| `roles` | The same effective role names under `roles`; not another role directory. |
 | `offline_access` | Offline refresh capability, also requiring client permission and consent. Not needed merely to log in. |
 
 The scopes are **allow-lists** at registration. The app must request them.
 Application permission scopes additionally require the user to hold them through
-a role. Never select every permission just to discover the user's access: missing
-requested permission denies the authorization request.
+a direct or group-derived role. A manually created client denies a request with
+a missing user permission. A dynamically registered client returns a narrower
+grant instead. Always check the granted scopes. Dynamic registration currently
+supports confidential code/PKCE clients without refresh tokens; see
+[the OIDC client guide](APP_CREATOR_OIDC.md).
 
 ## Sessions, keys and audit
 

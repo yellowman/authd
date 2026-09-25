@@ -32,8 +32,8 @@ or RADIUS/TACACS listener in this release.
 | Word | What it means here | What it does not mean |
 |---|---|---|
 | User | A person who can authenticate at authd. | An application, database role, or SIP device. |
-| Role | A named bundle assigned to users. It may contain permissions. | A universal role that every application automatically understands. |
-| Group | The OIDC `groups` claim exposes a user's authd role names. | A separate directory or second role editor. |
+| Role | A named bundle of permissions, assigned directly to users or through groups. | A universal role that every application automatically understands. |
+| Group | A reusable set of users that grants them one or more roles. | The OIDC `groups` claim: that legacy claim contains effective **role names**, not group names. |
 | Permission | A stable operation name the application has been written to check. | A way to create application behavior by typing a name here. |
 | Client | An application registered to ask authd for sign-in. | A person or a customer's account in your billing system. |
 | Issuer | authd's exact public HTTPS address. | Its Unix-socket pathname or internal HTTP listener. |
@@ -43,6 +43,9 @@ or RADIUS/TACACS listener in this release.
 
 `system-admin` is the built-in role for administering **authd**; it contains
 `system.admin`. It does not automatically make the person an application administrator.
+Keep at least one enabled administrator with `system-admin` assigned **directly**:
+the last-administrator safeguard checks direct role assignments, not group-only
+administration.
 PostgreSQL's `postgres`, `authd_owner`, and `authd_runtime` roles are a third,
 separate concept used during installation, not in the Users screen.
 
@@ -76,6 +79,8 @@ Follow [Adding an app to authd](docs/ADDING_AN_APP.md). It walks through choosin
 identity-only, role-name mapping or permission scopes; creating roles and users;
 registering the client; copying connection details; and testing from the app.
 You only configure the access model that the app actually implements.
+For a reusable developer/operator integration model, see
+[Application integration blueprint](docs/APPLICATION_INTEGRATION.md).
 
 Administration → Start here renders that same Markdown. Documentation provides
 all shipped Markdown files grouped by their actual directory, searchable by
@@ -89,7 +94,7 @@ Use them when an application actually checks OAuth permission scopes. This is a
 different integration path from a role-name mapping.
 
 For example, suppose an application implements `billing.invoices.read`. Create
-that permission in authd, include it in a role, assign the role to the user, and
+that permission in authd, include it in a role, assign the role directly or through a group, and
 allow that permission on the application's client. The app requests it during
 authorization and checks it when handling the operation.
 
@@ -98,16 +103,18 @@ All parts are necessary:
 ```text
 App implements/checks it
   + permission exists
-  + user's role contains it
+  + user's direct or group-derived role contains it
   + client is allowed to request it
   + app requests it
   = eligible permission scope in an issued access token
 ```
 
 Allowing a scope on the client does not give it to every user. Assigning it to a
-user's role does not automatically send it to every app. A missing requested
-application permission denies the authorization request; do not make a normal
-viewer request every administrator permission just to discover what they have.
+user's role does not automatically send it to every app. A manually created
+client denies authorization if the user lacks a requested application permission;
+a dynamically registered client instead narrows the grant to permissions the user
+holds. In either case, the app must inspect granted scopes, not assume it received
+everything it requested.
 
 Do not create `openid`, `profile`, `email`, `groups`, `roles`, or `offline_access`
 as application permissions. Those are built-in protocol scopes. Never use
@@ -119,8 +126,8 @@ An enabled zero-role user can authenticate to an identity-only client. There is
 no separate per-client allowed-users list. The relying application must enforce
 its own admission/membership policy or use an explicitly required permission.
 
-A client allowed to request `groups` or `roles` can receive **all assigned role
-names** for that user. There is no per-client role-name filter. Omit these scopes
+A client allowed to request `groups` or `roles` can receive **all effective role
+names** for that user, including roles granted through groups. There is no per-client role-name filter. Omit these scopes
 for clients that should not receive that information. `groups` and `roles` are
 released only when allowed and requested, but they are not tenant assignments.
 
@@ -133,7 +140,7 @@ it handles sign-in. See [RP_INTEGRATION.md](docs/RP_INTEGRATION.md).
 
 ### Add or remove someone
 
-Create the user, assign reviewed roles, and pass on the initial password securely.
+Create the user, assign reviewed direct roles or group memberships, and pass on the initial password securely.
 With forced password change, have the person visit Account before testing an app.
 For departure, **disable** the account to block new authd logins, revoke its authd
 sessions/refresh grants, and retain the identity for review. Also remove/revoke
@@ -199,7 +206,8 @@ separate 12-hour application cookie. This release does not implement back-channe
 logout that would remotely remove all application sessions.
 
 Refresh tokens let an application request new short-lived tokens without another
-interactive login. They are optional. Issuing them requires the client to allow
+interactive login. They are optional for manually created clients; dynamically
+registered clients do not currently receive them. Issuing them requires the client to allow
 refresh, allow/request `openid offline_access`, and complete `prompt=consent`.
 Applications must serialize refreshes because tokens rotate once per use; reuse
 revokes the family. Do not turn them on just because the checkbox exists.
@@ -222,10 +230,10 @@ revocation. Apps must still handle their own session lifecycle.
 | `invalid_client` | Enabled registration, exact client ID, matching current secret and correct client authentication method. |
 | Redirect rejected | Exact callback registration, including scheme, host, port, path and trailing slash. |
 | `invalid_scope` | Client asked for an unknown or disallowed scope. Enabling a checkbox here is only half the configuration. |
-| `access_denied` | User lacks a requested application permission, or declined consent. Check the requested set and the assigned roles. |
+| `access_denied` | User declined consent or, for a manually created client, lacks a requested application permission. Check requested scopes and effective roles. Dynamic clients may instead receive a narrower grant. |
 | `unmet_authentication_requirements` | An essential authentication requirement or client MFA floor cannot be met. Enroll the factor; do not treat voluntary `acr_values` alone as a mandatory MFA policy. |
-| Missing email/group at the app | Check user email, client-allowed scopes, the app-requested scopes, group-claim setting and exact mapping names. |
-| Wrong role or disabled user still in an app | Check the application's own cookie, provisioning/default-role policy, and admission logic. Revoke its session too. |
+| Missing email or role claim at the app | Check user email, client-allowed scopes, app-requested scopes, and effective roles. The optional `groups` claim contains role names, not group names. |
+| Wrong access or disabled user still in an app | Check granted scopes and the application's own cookie and admission logic. Revoke its session too. |
 | `invalid_grant` during callback or refresh | Expired/consumed code, binding mismatch, revoked grant, or reused refresh token. Restart authorization; never retry a spent credential indefinitely. |
 | Failure with a request reference | Correlate that reference and timestamp in authd/proxy logs; share neither secret values nor token-bearing URLs. |
 
