@@ -21,6 +21,12 @@ func IssueInitialRegistrationToken(ctx context.Context, pool *sql.DB, hash []byt
 }
 
 func (s *OIDCStore) RegisterDynamicClient(ctx context.Context, tokenHash []byte, edit oidc.ClientEdit, secretHash, managementHash []byte, scopes []string, roles []oidc.RoleTemplate, groups []oidc.GroupTemplate, a identity.Audit) (out oidc.Client, err error) {
+	if edit.TokenEndpointAuthMethod == "" {
+		edit.TokenEndpointAuthMethod = "client_secret_basic"
+	}
+	if edit.TokenEndpointAuthMethod != "client_secret_basic" && edit.TokenEndpointAuthMethod != "client_secret_post" {
+		return out, identity.Invalid("invalid token endpoint authentication method")
+	}
 	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
 		var tokenID, prefix string
 		if err := tx.QueryRowContext(ctx, `SELECT id::text,scope_prefix FROM initial_registration_tokens WHERE token_hash=$1 AND used_at IS NULL AND expires_at>clock_timestamp() FOR UPDATE`, tokenHash).Scan(&tokenID, &prefix); err != nil {
@@ -48,8 +54,8 @@ func (s *OIDCStore) RegisterDynamicClient(ctx context.Context, tokenHash []byte,
 		if len(secretHash) != 32 || len(tokenHash) != 32 || len(managementHash) != 32 || hmac.Equal(secretHash, tokenHash) || hmac.Equal(managementHash, tokenHash) || hmac.Equal(managementHash, secretHash) {
 			return identity.Invalid("invalid registration credentials")
 		}
-		if err := tx.QueryRowContext(ctx, `INSERT INTO clients(client_id,name,client_type,client_secret_hash,enabled,require_mfa,refresh_tokens_enabled,dynamic_registration,access_token_ttl_seconds)
- VALUES($1,$2,'confidential',$3,true,false,false,true,$4) RETURNING id::text`, edit.ClientID, edit.Name, secretHash, int64(edit.AccessTokenTTL.Seconds())).Scan(&edit.ID); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO clients(client_id,name,client_type,client_secret_hash,enabled,require_mfa,refresh_tokens_enabled,dynamic_registration,access_token_ttl_seconds,token_endpoint_auth_method)
+ VALUES($1,$2,'confidential',$3,true,false,false,true,$4,$5) RETURNING id::text`, edit.ClientID, edit.Name, secretHash, int64(edit.AccessTokenTTL.Seconds()), edit.TokenEndpointAuthMethod).Scan(&edit.ID); err != nil {
 			return err
 		}
 		if err := replaceClientSets(ctx, tx, edit.ID, edit); err != nil {

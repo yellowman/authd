@@ -174,11 +174,11 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	require(t, db.IssueInitialRegistrationToken(ctx, s.DB, identity.Hash(raw), "bdcmaps.", time.Now().Add(15*time.Minute)))
 	oidcStore := &db.OIDCStore{DB: s.DB}
 	loginSecret, managementToken := token(t), token(t)
-	client, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "dcr-test", Name: "Network Map", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email"}}, identity.Hash(loginSecret), identity.Hash(managementToken), []string{"bdcmaps.site.read", "bdcmaps.site.write"},
+	client, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "dcr-test", Name: "Network Map", Type: "confidential", Enabled: true, TokenEndpointAuthMethod: "client_secret_post", AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email"}}, identity.Hash(loginSecret), identity.Hash(managementToken), []string{"bdcmaps.site.read", "bdcmaps.site.write"},
 		[]oidc.RoleTemplate{{Name: "bdcmaps.defaults.viewer", Scopes: []string{"bdcmaps.site.read"}}},
 		[]oidc.GroupTemplate{{Name: "bdcmaps.defaults.readers", Roles: []string{"bdcmaps.defaults.viewer"}}}, auditFixture)
 	require(t, err)
-	if !client.DynamicRegistration || len(client.Permissions) != 2 {
+	if !client.DynamicRegistration || len(client.Permissions) != 2 || client.TokenEndpointAuthMethod != "client_secret_post" {
 		t.Fatalf("registered client missing scoped permissions: %#v", client)
 	}
 	var templateMemberships int
@@ -188,7 +188,7 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	}
 	managed, prefix, err := oidcStore.ManagedClient(ctx, client.ClientID, identity.Hash(managementToken))
 	require(t, err)
-	if prefix != "bdcmaps." || managed.ClientID != client.ClientID {
+	if prefix != "bdcmaps." || managed.ClientID != client.ClientID || managed.TokenEndpointAuthMethod != "client_secret_post" {
 		t.Fatal("management credential did not bind to client and namespace")
 	}
 	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), []string{"bdcmaps.site.read", "bdcmaps.site.write", "otherapp.admin"}, auditFixture)
@@ -204,10 +204,14 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	if len(managed.Permissions) != 3 {
 		t.Fatal("scope update did not publish new client permission")
 	}
-	rotated:=token(t)
-	require(t,db.IssueClientRegistrationToken(ctx,s.DB,client.ClientID,"bdcmaps.",identity.Hash(rotated)))
-	if _,_,err:=oidcStore.ManagedClient(ctx,client.ClientID,identity.Hash(managementToken));!errors.Is(err,oidc.ErrInvalidClient) { t.Fatalf("old management token remained valid: %v",err) }
-	if _,_,err:=oidcStore.ManagedClient(ctx,client.ClientID,identity.Hash(rotated));err!=nil { t.Fatalf("rotated token rejected: %v",err) }
+	rotated := token(t)
+	require(t, db.IssueClientRegistrationToken(ctx, s.DB, client.ClientID, "bdcmaps.", identity.Hash(rotated)))
+	if _, _, err := oidcStore.ManagedClient(ctx, client.ClientID, identity.Hash(managementToken)); !errors.Is(err, oidc.ErrInvalidClient) {
+		t.Fatalf("old management token remained valid: %v", err)
+	}
+	if _, _, err := oidcStore.ManagedClient(ctx, client.ClientID, identity.Hash(rotated)); err != nil {
+		t.Fatalf("rotated token rejected: %v", err)
+	}
 	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "replay", Name: "Replay", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), identity.Hash(token(t)), []string{"bdcmaps.site.read"}, nil, nil, auditFixture); !errors.Is(err, oidc.ErrRegistrationTokenUsed) {
 		t.Fatalf("replayed registration token: %v", err)
 	}

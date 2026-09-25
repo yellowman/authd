@@ -57,7 +57,7 @@ type RegistrationResponse struct {
 	GrantTypes              []string        `json:"grant_types"`
 	ResponseTypes           []string        `json:"response_types"`
 	Scope                   string          `json:"scope"`
-	TokenEndpointAuthMethod string          `json:"token_endpoint_auth_method"`
+	TokenEndpointAuthMethod string          `json:"token_endpoint_auth_method,omitempty"`
 	RegistrationAccessToken string          `json:"registration_access_token,omitempty"`
 	RegistrationClientURI   string          `json:"registration_client_uri,omitempty"`
 	AuthdRoleTemplates      []RoleTemplate  `json:"authd_role_templates,omitempty"`
@@ -132,7 +132,7 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
-	edit, err := validateClientEdit(ClientEdit{ClientID: "dcr-" + clientID, Name: req.ClientName, Type: "confidential", Enabled: true, AccessTokenTTL: time.Hour, RedirectURIs: req.RedirectURIs, IdentityScopes: identityScopeList})
+	edit, err := validateClientEdit(ClientEdit{ClientID: "dcr-" + clientID, Name: req.ClientName, Type: "confidential", Enabled: true, TokenEndpointAuthMethod: req.TokenEndpointAuthMethod, AccessTokenTTL: 5 * time.Minute, RedirectURIs: req.RedirectURIs, IdentityScopes: identityScopeList})
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
@@ -141,7 +141,7 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 		return RegistrationResponse{}, err
 	}
 	return RegistrationResponse{ClientID: client.ClientID, ClientSecret: secret, ClientIDIssuedAt: time.Now().Unix(), ClientSecretExpiresAt: 0,
-		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
+		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
 		RegistrationAccessToken: managementToken, RegistrationClientURI: s.registrationURI(client.ClientID), AuthdRoleTemplates: req.AuthdRoleTemplates, AuthdGroupTemplates: req.AuthdGroupTemplates}, nil
 }
 
@@ -191,7 +191,7 @@ func managedResponse(s *Service, c Client) RegistrationResponse {
 	slices.Sort(scopes)
 	return RegistrationResponse{ClientID: c.ClientID, ClientName: c.Name, RedirectURIs: c.RedirectURIs,
 		GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "),
-		TokenEndpointAuthMethod: "client_secret_basic", RegistrationClientURI: s.registrationURI(c.ClientID)}
+		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod, RegistrationClientURI: s.registrationURI(c.ClientID)}
 }
 
 func (s *Service) ManagedRegistration(ctx context.Context, clientID, token string) (RegistrationResponse, error) {
@@ -226,6 +226,7 @@ func (s *Service) UpdateManagedRegistration(ctx context.Context, clientID, token
 	if req.ClientID != clientID || req.ClientName != c.Name || !slices.Equal(req.RedirectURIs, c.RedirectURIs) ||
 		!slices.Equal(req.GrantTypes, []string{"authorization_code"}) || !slices.Equal(req.ResponseTypes, []string{"code"}) ||
 		(req.TokenEndpointAuthMethod != "client_secret_basic" && req.TokenEndpointAuthMethod != "client_secret_post") ||
+		(c.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != c.TokenEndpointAuthMethod) ||
 		!cryptoutil.ValidToken(req.ClientSecret) {
 		return RegistrationResponse{}, identity.Invalid("registration metadata or client secret is invalid")
 	}

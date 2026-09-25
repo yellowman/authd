@@ -6,22 +6,23 @@ import (
 )
 
 type Client struct {
-	ID                   string
-	ClientID             string
-	Name                 string
-	Type                 string
-	SecretHash           []byte
-	Enabled              bool
-	RequireMFA           bool
-	RefreshTokensEnabled bool
-	DynamicRegistration  bool
-	AccessTokenTTL       time.Duration
-	RedirectURIs         []string
-	LogoutURIs           []string
-	IdentityScopes       []string
-	PermissionIDs        []string
-	Permissions          []string
-	UpdatedAt            time.Time
+	ID                      string
+	ClientID                string
+	Name                    string
+	Type                    string
+	SecretHash              []byte
+	Enabled                 bool
+	RequireMFA              bool
+	RefreshTokensEnabled    bool
+	DynamicRegistration     bool
+	TokenEndpointAuthMethod string
+	AccessTokenTTL          time.Duration
+	RedirectURIs            []string
+	LogoutURIs              []string
+	IdentityScopes          []string
+	PermissionIDs           []string
+	Permissions             []string
+	UpdatedAt               time.Time
 }
 
 // ClaimSelection records explicit normal identity-claim requests. It never grants
@@ -99,17 +100,18 @@ type SigningKey struct {
 }
 
 type ClientEdit struct {
-	ID                   string
-	ClientID             string
-	Name                 string
-	Type                 string
-	Enabled              bool
-	RequireMFA           bool
-	RefreshTokensEnabled bool
-	AccessTokenTTL       time.Duration
-	RedirectURIs         []string
-	LogoutURIs           []string
-	IdentityScopes       []string
-	PermissionIDs        []string
-	ExpectedUpdatedAt    time.Time
+	ID                      string
+	ClientID                string
+	Name                    string
+	Type                    string
+	Enabled                 bool
+	RequireMFA              bool
+	RefreshTokensEnabled    bool
+	TokenEndpointAuthMethod string
+	AccessTokenTTL          time.Duration
+	RedirectURIs            []string
+	LogoutURIs              []string
+	IdentityScopes          []string
+	PermissionIDs           []string
+	ExpectedUpdatedAt       time.Time
 }

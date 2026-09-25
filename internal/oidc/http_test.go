@@ -352,6 +352,26 @@ func providerFixture(t testing.TB) (*HTTP, *Service, *fakeOIDCStore, *fakeSessio
 	return h, svc, store, sessions, sessionRaw, secret
 }
 func muxFor(h *HTTP) http.Handler { m := http.NewServeMux(); h.Register(m); return m }
+func TestRegisteredClientAuthenticationMethodIsEnforced(t *testing.T) {
+	h, _, store, _, _, secret := providerFixture(t)
+	for _, method := range []string{"client_secret_basic", "client_secret_post", ""} {
+		store.client.TokenEndpointAuthMethod = method
+		for _, basic := range []bool{true, false} {
+			r := httptest.NewRequest(http.MethodPost, "https://auth.example.test/token", nil)
+			form := url.Values{"client_id": {store.client.ClientID}}
+			if basic {
+				r.SetBasicAuth(store.client.ClientID, secret)
+			} else {
+				form.Set("client_secret", secret)
+			}
+			_, err := h.authenticateClient(r, form)
+			want := method == "" || (method == "client_secret_basic") == basic
+			if (err == nil) != want {
+				t.Fatalf("method %q, basic=%v: authentication result %v, want success=%v", method, basic, err, want)
+			}
+		}
+	}
+}
 func verifierAndChallenge() (string, string) {
 	v := strings.Repeat("A", 64)
 	sum := sha256.Sum256([]byte(v))

@@ -21,7 +21,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	var c oidc.Client
 	var ttl int64
 	var redirects, logouts, identityScopes, permissionIDs, permissions string
-	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &c.DynamicRegistration, &ttl, &c.UpdatedAt, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
+	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &c.DynamicRegistration, &c.TokenEndpointAuthMethod, &ttl, &c.UpdatedAt, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
 	if err != nil {
 		return c, err
 	}
@@ -44,7 +44,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	return c, nil
 }
 
-const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.dynamic_registration,c.access_token_ttl_seconds,c.updated_at,
+const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.dynamic_registration,COALESCE(c.token_endpoint_auth_method,''),c.access_token_ttl_seconds,c.updated_at,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_redirect_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_logout_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.scope ORDER BY x.scope) FROM client_identity_scopes x WHERE x.client_id=c.id),'[]'::json)::text,

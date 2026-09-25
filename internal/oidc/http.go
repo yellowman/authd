@@ -389,7 +389,9 @@ func (h *HTTP) authenticateClient(r *http.Request, form url.Values) (Client, err
 		if basic || postedSecretPresent || secret != "" {
 			return Client{}, ErrInvalidClient
 		}
-	} else if !h.service.VerifyClientSecret(client, secret) {
+	} else if (client.TokenEndpointAuthMethod == "client_secret_basic" && !basic) ||
+		(client.TokenEndpointAuthMethod == "client_secret_post" && basic) ||
+		!h.service.VerifyClientSecret(client, secret) {
 		return Client{}, ErrInvalidClient
 	}
 	return client, nil

@@ -2,8 +2,8 @@
 
 This document is sufficient to register an application, sign in a user, and
 authorize an application operation with authd using an ordinary OIDC client
-library. No authd-specific registration API is needed. The one local extension
-is that authd turns application-prefixed values in the standard registration
+library. No separate authd-specific registration endpoint is needed. One local
+behavior is that authd turns application-prefixed values in the standard registration
 `scope` field into permission names visible to its administrator. An optional
 authd extension can also create role and group templates. Registration never
 assigns a user to a role or group.
@@ -101,6 +101,10 @@ implemented. The registration request may omit
 `grant_types`, `response_types`, and `token_endpoint_auth_method` to get the
 values above. Do not request `offline_access`: dynamically registered clients
 do not currently receive refresh tokens.
+authd records the chosen client authentication method and requires that same
+method at its token and revocation endpoints. Scope updates do not change it.
+Registrations created before method recording retain their previous Basic/POST
+compatibility; their management response omits the unknown method.
 
 On success, authd returns HTTP 201 JSON with `client_id`, a one-time
 `client_secret`, `registration_client_uri`, `registration_access_token`, and the
@@ -171,7 +175,7 @@ application permission. Verify the token before reading its scope. If the
 application creates its own cookie session from a validated access token,
 carry only the validated grants into that session and expire it **no later
 than the access token**. The default dynamic-client access token lifetime is
-one hour; a shorter lifetime can be set in authd's client administration.
+five minutes; a different lifetime can be set in authd's client administration.
 Without refresh-token support, re-run the code flow when it expires. Role
 changes do not retract an already-issued JWT; the maximum stale-grant window
 is the remaining token/session lifetime.

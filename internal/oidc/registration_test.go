@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/identity"
@@ -15,14 +16,16 @@ type registrationFixture struct {
 	roles  []RoleTemplate
 	groups []GroupTemplate
 	called bool
+	edit   ClientEdit
 }
 
 func (f *registrationFixture) RegisterDynamicClient(_ context.Context, _ []byte, edit ClientEdit, _, _ []byte, scopes []string, roles []RoleTemplate, groups []GroupTemplate, _ identity.Audit) (Client, error) {
 	f.called = true
+	f.edit = edit
 	f.scopes = append([]string(nil), scopes...)
 	f.roles = append([]RoleTemplate(nil), roles...)
 	f.groups = append([]GroupTemplate(nil), groups...)
-	return Client{ClientID: edit.ClientID, Name: edit.Name, RedirectURIs: edit.RedirectURIs}, nil
+	return Client{ClientID: edit.ClientID, Name: edit.Name, RedirectURIs: edit.RedirectURIs, TokenEndpointAuthMethod: edit.TokenEndpointAuthMethod}, nil
 }
 
 func TestProtectedRegistrationMetadata(t *testing.T) {
@@ -38,6 +41,15 @@ func TestProtectedRegistrationMetadata(t *testing.T) {
 	}
 	if !f.called || len(f.scopes) != 2 || len(f.roles) != 1 || len(f.groups) != 1 || !strings.HasPrefix(response.ClientID, "dcr-") || response.ClientSecret == "" || response.RegistrationAccessToken == "" || response.RegistrationClientURI == "" || response.Scope != "bdcmaps.site.read bdcmaps.site.write email openid profile" {
 		t.Fatalf("registration did not retain client-only scopes: %#v, %v", response, f.scopes)
+	}
+	if f.edit.AccessTokenTTL != 5*time.Minute || f.edit.TokenEndpointAuthMethod != "client_secret_basic" {
+		t.Fatalf("unsafe dynamic registration defaults: %#v", f.edit)
+	}
+	post := req
+	post.TokenEndpointAuthMethod = "client_secret_post"
+	postResponse, err := s.RegisterDynamicClient(context.Background(), token, post, identity.Audit{})
+	if err != nil || f.edit.TokenEndpointAuthMethod != "client_secret_post" || postResponse.TokenEndpointAuthMethod != "client_secret_post" {
+		t.Fatalf("POST authentication was not retained: %v, %#v", err, f.edit)
 	}
 	f.called = false
 	req.Scope += " system.admin"
@@ -112,12 +124,29 @@ func TestManagedRegistrationScopeReplacement(t *testing.T) {
 	}
 	req := RegistrationRequest{ClientID: "dcr-test", ClientSecret: strings.Repeat("A", 43), ClientName: "Network Map", RedirectURIs: f.client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: "client_secret_basic", Scope: "openid email profile networkmap.site.read networkmap.coverage.run"}
 	out, err := s.UpdateManagedRegistration(context.Background(), "dcr-test", management, req, identity.Audit{})
-	if err != nil || len(f.updated) != 2 || out.ClientID != "dcr-test" || out.ClientSecret != req.ClientSecret {
+	if err != nil || len(f.updated) != 2 || out.ClientID != "dcr-test" || out.ClientSecret != req.ClientSecret || out.TokenEndpointAuthMethod != "" {
 		t.Fatalf("managed update: %#v %v", out, err)
 	}
 	f.updated = nil
 	req.Scope += " otherapp.admin"
 	if _, err = s.UpdateManagedRegistration(context.Background(), "dcr-test", management, req, identity.Audit{}); err == nil || f.updated != nil {
 		t.Fatal("cross-namespace update succeeded")
+	}
+}
+
+func TestManagedRegistrationRejectsAuthMethodChange(t *testing.T) {
+	f := &managedRegistrationFixture{client: Client{ClientID: "dcr-test", Name: "Example", RedirectURIs: []string{"https://example.test/callback"}, IdentityScopes: []string{"openid"}, Permissions: []string{"networkmap.read"}, TokenEndpointAuthMethod: "client_secret_post"}}
+	s := &Service{Store: f, issuer: "https://auth.example.test"}
+	management, err := cryptoutil.RandomToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed, err := s.ManagedRegistration(context.Background(), "dcr-test", management)
+	if err != nil || managed.TokenEndpointAuthMethod != "client_secret_post" {
+		t.Fatalf("managed registration lost auth method: %#v, %v", managed, err)
+	}
+	req := RegistrationRequest{ClientID: "dcr-test", ClientSecret: strings.Repeat("A", 43), ClientName: "Example", RedirectURIs: f.client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: "client_secret_basic", Scope: "openid networkmap.read"}
+	if _, err := s.UpdateManagedRegistration(context.Background(), "dcr-test", management, req, identity.Audit{}); err == nil || f.updated != nil {
+		t.Fatal("managed registration changed immutable authentication method")
 	}
 }

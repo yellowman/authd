@@ -75,6 +75,10 @@ func validateClientEdit(edit ClientEdit) (ClientEdit, error) {
 	if edit.Type != "public" && edit.Type != "confidential" {
 		return edit, identity.Invalid("client type must be public or confidential")
 	}
+	if edit.TokenEndpointAuthMethod != "" && (edit.Type != "confidential" ||
+		(edit.TokenEndpointAuthMethod != "client_secret_basic" && edit.TokenEndpointAuthMethod != "client_secret_post")) {
+		return edit, identity.Invalid("invalid token endpoint authentication method")
+	}
 	if edit.AccessTokenTTL < 30*time.Second || edit.AccessTokenTTL > time.Hour {
 		return edit, identity.Invalid("access token lifetime must be between 30 seconds and one hour")
 	}
