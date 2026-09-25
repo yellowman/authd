@@ -43,11 +43,71 @@ func (h *HTTP) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /userinfo", h.userinfo)
 	mux.HandleFunc("POST /revoke", h.revoke)
 	mux.HandleFunc("POST /register", h.register)
+	mux.HandleFunc("GET /register/{client_id}", h.manageRegistration)
+	mux.HandleFunc("PUT /register/{client_id}", h.manageRegistration)
 	mux.HandleFunc("OPTIONS /token", h.preflight("POST"))
 	mux.HandleFunc("OPTIONS /userinfo", h.preflight("GET, POST"))
 	mux.HandleFunc("OPTIONS /revoke", h.preflight("POST"))
 	mux.HandleFunc("GET /logout", h.logout)
 	mux.HandleFunc("POST /logout", h.logout)
+}
+
+func (h *HTTP) manageRegistration(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.service == nil {
+		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration unavailable")
+		return
+	}
+	if !h.limiter.Allow("registration-management:"+auditFromRequest(r).IP, 30, time.Minute) {
+		h.oauthError(w, http.StatusTooManyRequests, "invalid_request", "registration management rate limited")
+		return
+	}
+	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") || !cryptoutil.ValidToken(token) {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.oauthError(w, http.StatusUnauthorized, "invalid_token", "registration management token required")
+		return
+	}
+	clientID := r.PathValue("client_id")
+	var response RegistrationResponse
+	var err error
+	if r.Method == http.MethodGet {
+		response, err = h.service.ManagedRegistration(r.Context(), clientID, token)
+	} else {
+		mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if mediaErr != nil || mediaType != "application/json" {
+			h.oauthError(w, http.StatusUnsupportedMediaType, "invalid_client_metadata", "application/json required")
+			return
+		}
+		var req RegistrationRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+		if decoder.Decode(&req) != nil {
+			h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+			return
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration must be one JSON object")
+			return
+		}
+		response, err = h.service.UpdateManagedRegistration(r.Context(), clientID, token, req, auditFromRequest(r))
+	}
+	if err != nil {
+		if errors.Is(err, ErrInvalidClient) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			h.oauthError(w, http.StatusUnauthorized, "invalid_token", "registration credential or client is invalid")
+			return
+		}
+		var inputErr *identity.InputError
+		if errors.As(err, &inputErr) {
+			h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", inputErr.Error())
+			return
+		}
+		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration management unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *HTTP) register(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,8 +34,9 @@ func main() {
 
 func run() error {
 	registrationTokenCommand := len(os.Args) == 3 && os.Args[1] == "registration-token"
-	if !registrationTokenCommand && (len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap" && os.Args[1] != "migrate")) {
-		return errors.New("usage: authd [bootstrap|migrate|registration-token SCOPE_PREFIX]")
+	managementTokenCommand := len(os.Args) == 4 && os.Args[1] == "registration-management-token"
+	if !registrationTokenCommand && !managementTokenCommand && (len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap" && os.Args[1] != "migrate")) {
+		return errors.New("usage: authd [bootstrap|migrate|registration-token SCOPE_PREFIX|registration-management-token CLIENT_ID SCOPE_PREFIX]")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -86,6 +88,33 @@ func run() error {
 		// One-time credential: only the issuing terminal sees the plaintext.
 		fmt.Fprintln(os.Stdout, token)
 		return nil
+	}
+	if managementTokenCommand {
+		clientID, prefix := os.Args[2], os.Args[3]
+		issuer := strings.TrimRight(strings.TrimSpace(os.Getenv("AUTHD_ISSUER")), "/")
+		if issuer == "" || !oidc.ValidRegistrationPrefix(prefix) {
+			return errors.New("AUTHD_ISSUER and a valid scope prefix are required")
+		}
+		dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+		if dsn == "" {
+			return errors.New("DATABASE_URL is required")
+		}
+		pool, err := db.Open(ctx, dsn)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		if err = db.CheckSchema(ctx, pool); err != nil {
+			return err
+		}
+		token, err := cryptoutil.RandomToken(32)
+		if err != nil {
+			return err
+		}
+		if err = db.IssueClientRegistrationToken(ctx, pool, clientID, prefix, identity.Hash(token)); err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"registration_client_uri": issuer + "/register/" + clientID, "registration_access_token": token})
 	}
 
 	cfg, err := config.Load()

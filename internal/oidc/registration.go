@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,29 +22,55 @@ func ValidRegistrationPrefix(prefix string) bool {
 // RegistrationRequest uses the standard RFC 7591 client metadata names.
 // Other metadata is ignored; this server supports only confidential code+PKCE.
 type RegistrationRequest struct {
-	ClientName              string   `json:"client_name"`
-	RedirectURIs            []string `json:"redirect_uris"`
-	GrantTypes              []string `json:"grant_types"`
-	ResponseTypes           []string `json:"response_types"`
-	Scope                   string   `json:"scope"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	ClientID                string          `json:"client_id,omitempty"`
+	ClientSecret            string          `json:"client_secret,omitempty"`
+	ClientName              string          `json:"client_name"`
+	RedirectURIs            []string        `json:"redirect_uris"`
+	GrantTypes              []string        `json:"grant_types"`
+	ResponseTypes           []string        `json:"response_types"`
+	Scope                   string          `json:"scope"`
+	TokenEndpointAuthMethod string          `json:"token_endpoint_auth_method"`
+	AuthdRoleTemplates      []RoleTemplate  `json:"authd_role_templates,omitempty"`
+	AuthdGroupTemplates     []GroupTemplate `json:"authd_group_templates,omitempty"`
+}
+
+// These fields are authd-specific client metadata, not OIDC/OAuth standard
+// metadata. They define optional defaults; user membership is never supplied.
+type RoleTemplate struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Scopes      []string `json:"scopes"`
+}
+type GroupTemplate struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Roles       []string `json:"roles"`
 }
 
 type RegistrationResponse struct {
-	ClientID                string   `json:"client_id"`
-	ClientSecret            string   `json:"client_secret"`
-	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
-	ClientSecretExpiresAt   int64    `json:"client_secret_expires_at"`
-	ClientName              string   `json:"client_name"`
-	RedirectURIs            []string `json:"redirect_uris"`
-	GrantTypes              []string `json:"grant_types"`
-	ResponseTypes           []string `json:"response_types"`
-	Scope                   string   `json:"scope"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	ClientID                string          `json:"client_id"`
+	ClientSecret            string          `json:"client_secret"`
+	ClientIDIssuedAt        int64           `json:"client_id_issued_at"`
+	ClientSecretExpiresAt   int64           `json:"client_secret_expires_at"`
+	ClientName              string          `json:"client_name"`
+	RedirectURIs            []string        `json:"redirect_uris"`
+	GrantTypes              []string        `json:"grant_types"`
+	ResponseTypes           []string        `json:"response_types"`
+	Scope                   string          `json:"scope"`
+	TokenEndpointAuthMethod string          `json:"token_endpoint_auth_method"`
+	RegistrationAccessToken string          `json:"registration_access_token,omitempty"`
+	RegistrationClientURI   string          `json:"registration_client_uri,omitempty"`
+	AuthdRoleTemplates      []RoleTemplate  `json:"authd_role_templates,omitempty"`
+	AuthdGroupTemplates     []GroupTemplate `json:"authd_group_templates,omitempty"`
 }
 
 type dynamicRegistrar interface {
-	RegisterDynamicClient(context.Context, []byte, ClientEdit, []byte, []string, identity.Audit) (Client, error)
+	RegisterDynamicClient(context.Context, []byte, ClientEdit, []byte, []byte, []string, []RoleTemplate, []GroupTemplate, identity.Audit) (Client, error)
+}
+
+type managedRegistrar interface {
+	ManagedClient(context.Context, string, []byte) (Client, string, error)
+	UpdateManagedClientScopes(context.Context, string, []byte, []byte, []string, identity.Audit) (Client, error)
 }
 
 func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req RegistrationRequest, a identity.Audit) (RegistrationResponse, error) {
@@ -90,6 +117,9 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if len(appScopes) == 0 {
 		return RegistrationResponse{}, identity.Invalid("at least one application permission scope is required")
 	}
+	if err := validateTemplates(req.AuthdRoleTemplates, req.AuthdGroupTemplates, appScopes); err != nil {
+		return RegistrationResponse{}, err
+	}
 	clientID, err := cryptoutil.RandomToken(16)
 	if err != nil {
 		return RegistrationResponse{}, err
@@ -98,16 +128,135 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
+	managementToken, err := cryptoutil.RandomToken(32)
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
 	edit, err := validateClientEdit(ClientEdit{ClientID: "dcr-" + clientID, Name: req.ClientName, Type: "confidential", Enabled: true, AccessTokenTTL: time.Hour, RedirectURIs: req.RedirectURIs, IdentityScopes: identityScopeList})
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
-	client, err := store.RegisterDynamicClient(ctx, identity.Hash(token), edit, identity.Hash(secret), appScopes, a)
+	client, err := store.RegisterDynamicClient(ctx, identity.Hash(token), edit, identity.Hash(secret), identity.Hash(managementToken), appScopes, req.AuthdRoleTemplates, req.AuthdGroupTemplates, a)
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
 	return RegistrationResponse{ClientID: client.ClientID, ClientSecret: secret, ClientIDIssuedAt: time.Now().Unix(), ClientSecretExpiresAt: 0,
-		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: req.TokenEndpointAuthMethod}, nil
+		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
+		RegistrationAccessToken: managementToken, RegistrationClientURI: s.registrationURI(client.ClientID), AuthdRoleTemplates: req.AuthdRoleTemplates, AuthdGroupTemplates: req.AuthdGroupTemplates}, nil
+}
+
+func validateTemplates(roles []RoleTemplate, groups []GroupTemplate, appScopes []string) error {
+	if len(roles) > 16 || len(groups) > 16 {
+		return identity.Invalid("too many role or group templates")
+	}
+	allowed := make(map[string]bool, len(appScopes))
+	for _, v := range appScopes {
+		allowed[v] = true
+	}
+	roleNames := map[string]bool{}
+	for _, r := range roles {
+		if !applicationScope.MatchString(r.Name) || len(r.Name) > 128 || len(r.Description) > 500 || roleNames[r.Name] || len(r.Scopes) == 0 || len(r.Scopes) > 64 {
+			return identity.Invalid("invalid role template")
+		}
+		roleNames[r.Name] = true
+		seen := map[string]bool{}
+		for _, v := range r.Scopes {
+			if !allowed[v] || seen[v] {
+				return identity.Invalid("role template contains an unknown or duplicate scope")
+			}
+			seen[v] = true
+		}
+	}
+	groupNames := map[string]bool{}
+	for _, g := range groups {
+		if !applicationScope.MatchString(g.Name) || len(g.Name) > 128 || len(g.Description) > 500 || groupNames[g.Name] || len(g.Roles) == 0 || len(g.Roles) > 16 {
+			return identity.Invalid("invalid group template")
+		}
+		groupNames[g.Name] = true
+		seen := map[string]bool{}
+		for _, v := range g.Roles {
+			if !roleNames[v] || seen[v] {
+				return identity.Invalid("group template references unknown or duplicate role")
+			}
+			seen[v] = true
+		}
+	}
+	return nil
+}
+
+func (s *Service) registrationURI(clientID string) string { return s.issuer + "/register/" + clientID }
+
+func managedResponse(s *Service, c Client) RegistrationResponse {
+	scopes := append(append([]string(nil), c.IdentityScopes...), c.Permissions...)
+	slices.Sort(scopes)
+	return RegistrationResponse{ClientID: c.ClientID, ClientName: c.Name, RedirectURIs: c.RedirectURIs,
+		GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "),
+		TokenEndpointAuthMethod: "client_secret_basic", RegistrationClientURI: s.registrationURI(c.ClientID)}
+}
+
+func (s *Service) ManagedRegistration(ctx context.Context, clientID, token string) (RegistrationResponse, error) {
+	store, ok := s.Store.(managedRegistrar)
+	if !ok {
+		return RegistrationResponse{}, ErrRegistrationNotSupported
+	}
+	if !cryptoutil.ValidToken(token) {
+		return RegistrationResponse{}, ErrInvalidClient
+	}
+	c, _, err := store.ManagedClient(ctx, clientID, identity.Hash(token))
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
+	return managedResponse(s, c), nil
+}
+
+// UpdateManagedRegistration supports a full scope replacement while preserving
+// the client's identifier, login secret, redirect URIs, and other metadata.
+func (s *Service) UpdateManagedRegistration(ctx context.Context, clientID, token string, req RegistrationRequest, a identity.Audit) (RegistrationResponse, error) {
+	store, ok := s.Store.(managedRegistrar)
+	if !ok {
+		return RegistrationResponse{}, ErrRegistrationNotSupported
+	}
+	if !cryptoutil.ValidToken(token) {
+		return RegistrationResponse{}, ErrInvalidClient
+	}
+	c, prefix, err := store.ManagedClient(ctx, clientID, identity.Hash(token))
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
+	if req.ClientID != clientID || req.ClientName != c.Name || !slices.Equal(req.RedirectURIs, c.RedirectURIs) ||
+		!slices.Equal(req.GrantTypes, []string{"authorization_code"}) || !slices.Equal(req.ResponseTypes, []string{"code"}) ||
+		(req.TokenEndpointAuthMethod != "client_secret_basic" && req.TokenEndpointAuthMethod != "client_secret_post") ||
+		!cryptoutil.ValidToken(req.ClientSecret) {
+		return RegistrationResponse{}, identity.Invalid("registration metadata or client secret is invalid")
+	}
+	scopes, err := parseScopes(req.Scope)
+	if err != nil || !contains(scopes, "openid") {
+		return RegistrationResponse{}, identity.Invalid("invalid registration scope")
+	}
+	appScopes := make([]string, 0, len(scopes))
+	ident := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if identityScopes[scope] {
+			if scope == "offline_access" {
+				return RegistrationResponse{}, identity.Invalid("offline_access is not supported")
+			}
+			ident = append(ident, scope)
+		} else if len(scope) <= 128 && applicationScope.MatchString(scope) && strings.HasPrefix(scope, prefix) && scope != prefix {
+			appScopes = append(appScopes, scope)
+		} else {
+			return RegistrationResponse{}, identity.Invalid("scope is outside registration namespace")
+		}
+	}
+	if len(appScopes) == 0 || !slices.Equal(ident, c.IdentityScopes) {
+		return RegistrationResponse{}, identity.Invalid("identity scopes or application scopes are invalid")
+	}
+	c, err = store.UpdateManagedClientScopes(ctx, clientID, identity.Hash(token), identity.Hash(req.ClientSecret), appScopes, a)
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
+	out := managedResponse(s, c)
+	out.ClientSecret = req.ClientSecret
+	return out, nil
 }
 
 var ErrRegistrationTokenUsed = errors.New("initial registration token is invalid, expired, or already used")

@@ -173,17 +173,47 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	raw := token(t)
 	require(t, db.IssueInitialRegistrationToken(ctx, s.DB, identity.Hash(raw), "bdcmaps.", time.Now().Add(15*time.Minute)))
 	oidcStore := &db.OIDCStore{DB: s.DB}
-	client, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "dcr-test", Name: "BDC Maps", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read", "bdcmaps.site.write"}, auditFixture)
+	loginSecret, managementToken := token(t), token(t)
+	client, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "dcr-test", Name: "Network Map", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email"}}, identity.Hash(loginSecret), identity.Hash(managementToken), []string{"bdcmaps.site.read", "bdcmaps.site.write"},
+		[]oidc.RoleTemplate{{Name: "bdcmaps.defaults.viewer", Scopes: []string{"bdcmaps.site.read"}}},
+		[]oidc.GroupTemplate{{Name: "bdcmaps.defaults.readers", Roles: []string{"bdcmaps.defaults.viewer"}}}, auditFixture)
 	require(t, err)
 	if !client.DynamicRegistration || len(client.Permissions) != 2 {
 		t.Fatalf("registered client missing scoped permissions: %#v", client)
 	}
-	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "replay", Name: "Replay", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture); !errors.Is(err, oidc.ErrRegistrationTokenUsed) {
+	var templateMemberships int
+	require(t, s.DB.QueryRowContext(ctx, `SELECT count(*) FROM user_groups ug JOIN groups g ON g.id=ug.group_id WHERE g.name='bdcmaps.defaults.readers'`).Scan(&templateMemberships))
+	if templateMemberships != 0 {
+		t.Fatal("registration assigned a user to a template group")
+	}
+	managed, prefix, err := oidcStore.ManagedClient(ctx, client.ClientID, identity.Hash(managementToken))
+	require(t, err)
+	if prefix != "bdcmaps." || managed.ClientID != client.ClientID {
+		t.Fatal("management credential did not bind to client and namespace")
+	}
+	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), []string{"bdcmaps.site.read", "bdcmaps.site.write", "otherapp.admin"}, auditFixture)
+	if err == nil {
+		t.Fatal("cross-namespace scope update succeeded")
+	}
+	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture)
+	if !errors.Is(err, oidc.ErrInvalidClient) {
+		t.Fatalf("wrong login secret accepted: %v", err)
+	}
+	managed, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), []string{"bdcmaps.site.read", "bdcmaps.site.write", "bdcmaps.coverage.run"}, auditFixture)
+	require(t, err)
+	if len(managed.Permissions) != 3 {
+		t.Fatal("scope update did not publish new client permission")
+	}
+	rotated:=token(t)
+	require(t,db.IssueClientRegistrationToken(ctx,s.DB,client.ClientID,"bdcmaps.",identity.Hash(rotated)))
+	if _,_,err:=oidcStore.ManagedClient(ctx,client.ClientID,identity.Hash(managementToken));!errors.Is(err,oidc.ErrInvalidClient) { t.Fatalf("old management token remained valid: %v",err) }
+	if _,_,err:=oidcStore.ManagedClient(ctx,client.ClientID,identity.Hash(rotated));err!=nil { t.Fatalf("rotated token rejected: %v",err) }
+	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "replay", Name: "Replay", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), identity.Hash(token(t)), []string{"bdcmaps.site.read"}, nil, nil, auditFixture); !errors.Is(err, oidc.ErrRegistrationTokenUsed) {
 		t.Fatalf("replayed registration token: %v", err)
 	}
 	other := token(t)
 	require(t, db.IssueInitialRegistrationToken(ctx, s.DB, identity.Hash(other), "inventory.", time.Now().Add(15*time.Minute)))
-	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(other), oidc.ClientEdit{ClientID: "wrong-prefix", Name: "Wrong", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture); err == nil {
+	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(other), oidc.ClientEdit{ClientID: "wrong-prefix", Name: "Wrong", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), identity.Hash(token(t)), []string{"bdcmaps.site.read"}, nil, nil, auditFixture); err == nil {
 		t.Fatal("namespace-limited token registered foreign permission")
 	}
 	data, err := s.AdminData(ctx, actor.TokenHash)

@@ -48,8 +48,8 @@ func NewMetadata(issuer string) Metadata {
 		GrantTypesSupported:                    []string{"authorization_code", "refresh_token"},
 		SubjectTypesSupported:                  []string{"public"},
 		IDTokenSigningAlgValuesSupported:       []string{"RS256"},
-		// client_secret_post exists specifically because bdcmaps uses it today.
-		// New confidential clients should prefer client_secret_basic.
+		// Confidential clients should prefer client_secret_basic; post remains
+		// available for clients whose libraries require it.
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		ScopesSupported:                   []string{"openid", "profile", "email", "groups", "roles", "offline_access"},

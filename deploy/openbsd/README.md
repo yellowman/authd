@@ -51,7 +51,7 @@ restarted daemon would otherwise create a private `0600` socket and the proxy
 would return 502.
 It creates no runtime pgpass password and does not migrate the database.
 `authd migrate` remains a separate owner-credential step. The groups and dynamic
-registration upgrade adds migration 006; apply it and the runtime grants before
+registration upgrade adds migrations 006 and 007; apply them and the runtime grants before
 restarting the upgraded service.
 Native rcctl start/check/restart/stop still require actual OpenBSD qualification;
 shell syntax checks and cross-compilation are not proof of native service use.
