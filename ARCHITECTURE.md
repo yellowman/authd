@@ -9,8 +9,9 @@ Own identity once and expose it through a small number of protocol frontends.
                             │
                  ┌──────────┴──────────┐
                  │ identity + access  │
-                 │ users / roles /    │
-                 │ permissions / MFA  │
+                 │ users / groups /   │
+                 │ roles / permissions│
+                 │ MFA               │
                  └──────────┬──────────┘
                             │
               ┌─────────────┼─────────────┐
@@ -23,7 +24,7 @@ Own identity once and expose it through a small number of protocol frontends.
 * future adapters, not v1 deliverables
 ```
 
-The identity core owns users, credential verification, MFA state, role membership, and permission resolution. Protocol packages may ask the core to authenticate a subject and resolve authorization facts. They may not duplicate identity records.
+The identity core owns users, credential verification, MFA state, direct and group-derived role membership, and permission resolution. Protocol packages may ask the core to authenticate a subject and resolve authorization facts. They may not duplicate identity records.
 
 ## Process shape
 
@@ -57,21 +58,19 @@ A later RADIUS or TACACS+ listener may live in the same binary if the implementa
 ## Identity model
 
 ```text
-users
-  ├── password_credentials (canonical Argon2id verifier)
-  └── user_roles
-        └── roles
-              └── role_permissions
-                    └── permissions
+users ── password_credentials (canonical Argon2id verifier)
+  ├── user_roles ────────────────────────┐
+  └── user_groups → groups → group_roles ├── roles → role_permissions → permissions
 ```
 
 Authorization is additive only:
 
 ```text
-effective permissions = union(all permissions in all assigned roles)
+effective roles = direct roles ∪ roles from all user groups
+effective permissions = union(permissions in effective roles)
 ```
 
-No nested roles, user-direct permissions, deny rules, precedence, policy language, or expression engine.
+No nested groups or roles, user-direct permissions, deny rules, precedence, policy language, or expression engine.
 
 Roles are human administration bundles. Permissions are the stable application authorization API.
 
@@ -91,7 +90,7 @@ bdcmaps.plan.write
 bdcmaps.admin
 ```
 
-`groups` and `roles` are aliases over the same role names. `groups` exists because many clients—including the existing `bdcmaps` client—already expect it.
+The optional `groups` and `roles` claims are aliases over the same **effective role names**. The legacy `groups` claim does not list authd group objects. New clients should check granted access-token scopes instead of these claims.
 
 A client has its own allow-list of application permissions. A permission can appear in a token only when all three are true:
 
@@ -100,6 +99,12 @@ requested by the client
 AND allowed for that client
 AND possessed by the user
 ```
+
+OIDC clients can be created in the administrator UI or through discovery-advertised
+Dynamic Client Registration. In authd, application-prefixed values in the
+standard registration `scope` field populate the permission catalog. Optional
+authd-specific metadata can create unassigned role and group templates; neither
+path grants a person access. See `docs/APP_CREATOR_OIDC.md` for the wire contract.
 
 ## Future network protocols
 

@@ -121,15 +121,18 @@ The normal `profile`/`email` scopes request their supported bundles. A supported
 without requesting the whole bundle. Missing profile fields, including unavailable
 essential profile fields, are omitted; do not assume every account has email.
 Neither `groups` nor `roles` is a standardized organizational membership model;
-here both are gated views of the same local roles. Application permissions remain
+here both are gated views of effective local role **names**, including roles
+granted through authd groups; neither claim lists authd group names. Application permissions remain
 requested OAuth scopes, never a claim supplied by the browser.
 
 ## Offline access and refresh serialization
 
-Request `openid offline_access` **and `prompt=consent`**, and configure that client
+For a manually configured client, request `openid offline_access` **and
+`prompt=consent`**, and configure that client
 to permit refresh tokens. The user must approve the browser-bound consent page.
 Without explicit consent, authd drops `offline_access` and issues no refresh
-credential. Inspect the actual response scopes and refresh-token presence.
+credential. Dynamically registered authd clients do not currently receive
+refresh tokens. Inspect the actual response scopes and refresh-token presence.
 
 Keep refresh tokens server-side or in an appropriately protected client store.
 Serialize refresh per local RP session, including concurrent tabs/requests; adopt

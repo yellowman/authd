@@ -1,8 +1,8 @@
 # authd — Identity, OIDC, and Access Service
 
-## Specification v0.9.3
+## Specification (current implementation; historical sections retain version labels)
 
-Status: binding product design; implementation corrected by the v0.9.0 protocol, transaction, and performance audit. See `docs/OIDC_AUDIT.md` and `VALIDATION.md`. This is not an OpenID certification or production signoff.
+Status: binding product design, extended with groups and Dynamic Client Registration. See `docs/APP_CREATOR_OIDC.md` for the current registration wire contract, `docs/OIDC_AUDIT.md` for the earlier protocol audit, and `VALIDATION.md` for dated evidence. This is not an OpenID certification or production signoff.
 
 ## 1. Purpose
 
@@ -11,7 +11,7 @@ Status: binding product design; implementation corrected by the v0.9.0 protocol,
 The primary product is:
 
 ```text
-local users + local credentials + roles + permissions
+local users + local credentials + groups + roles + permissions
                          │
                          └── OIDC/OAuth provider
                                   │
@@ -29,13 +29,13 @@ The server shall provide:
 - PKCE for every client;
 - local username/password accounts;
 - optional local TOTP MFA;
-- local roles and permissions;
-- OIDC/OAuth clients configured through the web UI;
+- local groups, roles and permissions;
+- OIDC/OAuth clients configured through the web UI or Dynamic Client Registration;
 - short-lived signed JWT access tokens;
 - rotating opaque refresh tokens;
 - provider session management;
 - RP-initiated logout;
-- a local web UI for users, roles, permissions, clients, sessions, audit, and keys;
+- a local web UI for users, groups, roles, permissions, clients, sessions, audit, and keys;
 - a self-service account page;
 - an explicit internal boundary for future protocol frontends such as RADIUS and TACACS+.
 
@@ -100,7 +100,6 @@ Out of scope unless promoted by a concrete requirement:
 - YAML-defined users;
 - YAML-defined roles;
 - YAML-defined authorization rules;
-- Dynamic Client Registration;
 - OAuth implicit flow;
 - OAuth hybrid flow;
 - Resource Owner Password Credentials grant;
@@ -166,39 +165,40 @@ A dependency is preferred over local code when the alternative would require imp
 The authorization model is deliberately simple.
 
 ```text
-User
-  │
-  └── has zero or more Roles
-                         │
-                         └── contains zero or more Permissions
+User → direct Roles ────────────────────────┐
+    └→ Groups → group-granted Roles ────────┴→ effective Roles → Permissions
 ```
 
 A user's effective permissions are:
 
 ```text
 effective_permissions(user) =
-    UNION(permissions of every role assigned to user)
+    UNION(permissions of every direct or group-derived role)
 ```
 
 There are no denies.
 
 There is no precedence.
 
-There is no inheritance.
+There is no role inheritance or nesting; group membership is a flat additional
+source of assigned roles.
 
-There are no nested roles.
+There are no nested roles or groups.
 
 Permissions MUST NOT be assigned directly to users in v1.
 
-The three core authorization concepts are:
+The core authorization concepts are:
 
 ```text
 users
+groups
 roles
 permissions
 ```
 
-The word `groups` is supported as an OIDC claim alias for role names because existing clients commonly consume a `groups` claim. It does not create a fourth authorization object.
+Administrative groups are real user-to-role assignments. Separately, the optional
+OIDC `groups` claim remains a compatibility alias containing **effective role
+names**, not the names of administrative groups.
 
 Authentication and authorization are distinct. An enabled user with a valid credential and zero roles MAY authenticate to an OIDC client requesting only identity scopes. A zero-role user has zero application permissions and cannot access `system.admin`; role membership is not a prerequisite for proving identity.
 
@@ -526,7 +526,11 @@ If the client requests an unknown or disallowed scope:
 error=invalid_scope
 ```
 
-If a client is allowed to request an application permission but the user does not possess it, authorization fails rather than silently pretending the requested authorization succeeded.
+If a manually configured client requests an allowed application permission the
+user does not possess, authorization fails. Dynamically registered clients
+instead receive a narrowed grant containing only requested permissions the user
+holds. In both cases the token response reports the actual grant; clients MUST
+check it rather than infer authorization from requested scope.
 
 The provider MUST NOT grant an application scope that the client did not request.
 
@@ -552,17 +556,25 @@ If `roles` is requested and allowed:
 
 A client may request either or both.
 
-If both scopes are requested and allowed, both claims MAY be emitted and MUST represent the same current local role membership. Client input can never inject role names into either claim.
+If both scopes are requested and allowed, both claims MAY be emitted and MUST represent the same current effective role membership, including group-derived roles. Client input can never inject role names into either claim.
 
-This compatibility alias is intentional. It allows applications such as `bdcmaps` to consume conventional `groups` without introducing a separate group-management model.
+This compatibility alias is intentional for older role-name clients. New clients
+SHOULD authorize operations with granted access-token scopes. Claim values are
+not the names of authd's administrative groups.
 
 ---
 
 # 11. OIDC/OAuth Clients
 
-Clients are created manually through the administration interface. The `clients` model and tables in v1 are specifically OIDC/OAuth client registrations; they are not a polymorphic registry for every future protocol peer. RADIUS NAS registrations, TACACS+ clients, and other protocol peers receive protocol-specific records when those adapters are implemented.
-
-There is no Dynamic Client Registration endpoint in v1.
+Clients are created manually through the administration interface or with
+discovery-advertised Dynamic Client Registration using a one-use,
+prefix-limited initial token. The standard registration `scope` metadata is
+interpreted by authd as an application permission catalog; optional
+`authd_role_templates` and `authd_group_templates` are authd-specific and do
+not assign users. Dynamic clients currently are confidential code/PKCE clients
+without refresh tokens. See `docs/APP_CREATOR_OIDC.md` for the precise protocol
+and management limitations. OIDC/OAuth client registrations are not a
+polymorphic registry for future RADIUS/TACACS+ peers.
 
 A client record contains:
 
@@ -573,6 +585,7 @@ name
 type
 client_secret_hash
 enabled
+dynamic_registration
 redirect_uris[]
 post_logout_redirect_uris[]
 allowed_identity_scopes[]
@@ -620,7 +633,9 @@ client_secret_post
 
 `client_secret_basic` is preferred for new clients.
 
-`client_secret_post` is retained because the first target, `bdcmaps`, currently sends its client secret in the token request body.
+`client_secret_post` is retained for compatibility with clients that send their
+secret in the token request body; current dynamic BDC registration uses
+`client_secret_basic`.
 
 Confidential clients MUST also use PKCE S256.
 
@@ -1366,8 +1381,10 @@ Every admin request verifies the permission server-side. Administrative writes
 also recheck the live session and `system.admin` inside the mutation transaction.
 They require authentication within the preceding ten minutes. Read-only admin
 views remain available to older live sessions. Enabling/disabling users, changing
-role assignments, or editing roles MUST preserve at least one enabled, non-deleted
-holder of `system.admin`; concurrent mutations MUST serialize this invariant.
+direct role assignments, or editing roles MUST preserve at least one enabled,
+non-deleted **direct** holder of `system.admin`; concurrent mutations MUST
+serialize this invariant. Group-derived administration is possible, but it
+does not replace the required direct holder for the last-administrator check.
 
 The UI uses server-rendered HTML and embedded static assets.
 
@@ -1578,8 +1595,15 @@ password_credentials
 roles
 permissions
 user_roles
+groups
+group_roles
+user_groups
 role_permissions
 clients
+initial_registration_tokens
+client_registration_credentials
+client_role_templates
+client_group_templates
 client_redirect_uris
 client_logout_uris
 client_identity_scopes
@@ -2097,44 +2121,18 @@ Where both client and server support it, TACACS+ over TLS 1.3 SHOULD be preferre
 
 ---
 
-# 39. bdcmaps Compatibility Profile
+# 39. Application Integration Profile
 
-The first client is the existing `yellowman/bdcmaps` OIDC implementation.
-
-Observed client behavior that `authd` MUST support:
-
-```text
-OIDC discovery at /.well-known/openid-configuration
-Authorization Code flow
-PKCE S256
-nonce validation
-login_hint
-JWKS validation
-RS256 ID tokens
-fresh-database configured scopes default to: openid profile email
-client-code fallback scopes (when no scopes are supplied): openid profile email groups
-email/email_verified claims
-groups claim is available for application role mapping when requested
-client_secret supplied in token request body
-```
-
-Therefore the first `bdcmaps` client should be registered approximately as:
-
-```text
-name: BDC Maps
-client_id: bdcmaps
-type: confidential
-redirect URI: https://<bdcmaps-origin>/auth/callback
-identity scopes: openid profile email groups
-client auth: client_secret_post accepted
-PKCE: required
-```
-
-The exact production origin is deployment-specific and MUST NOT be guessed or built into `authd`.
-
-`bdcmaps` currently maps configured `groups` claim values to its own application roles. `authd` role names can be selected to match the desired BDC group configuration without changing the OIDC client.
-
-Longer-term, `bdcmaps` may migrate authorization from broad group-to-role mapping toward application permission scopes, but first integration does not require that rewrite.
+An application MUST validate the OIDC sign-in result and the granted
+access-token scopes, then enforce its own resource and admission rules. The
+application supplies exact callback URLs and an operation-scope catalog; authd
+supplies identity, optional MFA, roles/groups and eligible OAuth grants.
+Registration does not assign anyone access. The reusable operator/developer
+contract is in `docs/APPLICATION_INTEGRATION.md`, with wire-level details in
+`docs/APP_CREATOR_OIDC.md` and the identity/tenancy boundary in
+`docs/RP_INTEGRATION.md`. Application-specific manifests and deployment steps
+belong in that application's repository. Dated integration evidence remains in
+`VALIDATION.md` and does not automatically qualify later app revisions.
 
 ---
 
@@ -2264,7 +2262,7 @@ An administrator can:
 3. Log into /admin.
 4. Create permissions.
 5. Create roles containing permissions.
-6. Create users and assign roles.
+6. Create groups containing roles, and users with direct roles or group memberships.
 7. Create an OIDC client.
 8. Add exact redirect URIs.
 9. Select allowed identity scopes.
@@ -2287,12 +2285,14 @@ An application can:
 7. Receive groups/roles claims when requested.
 8. Express ACR preferences through `acr_values`, mandatory context through essential `claims`, and validate the returned authentication context.
 9. Retain `(iss, sub, sid)` with its local application session.
-10. Refresh using rotating refresh tokens without losing `acr`/`sid` correlation.
+10. For a manually configured client with offline access, refresh using rotating refresh tokens without losing `acr`/`sid` correlation.
 11. Use /userinfo when needed.
 12. Perform RP-initiated logout.
 ```
 
-`bdcmaps` can complete its existing OIDC flow without a provider-specific client-code fork.
+An app can register dynamically and check granted access-token scopes without
+an authd-specific sign-in library; role/group template metadata is optional
+authd-specific registration behavior.
 
 That is the v1 product.
 

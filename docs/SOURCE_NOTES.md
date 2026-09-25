@@ -3,35 +3,14 @@
 These notes record the concrete repositories used to shape the starter rather
 than leaving important compatibility choices as oral history.
 
-## yellowman/bdcmaps
+This is a **2026-09-21 source snapshot**, not current deployment guidance.
+Application-specific registration and deployment instructions belong in each
+application's repository; the current reusable authd contract is in
+`docs/APPLICATION_INTEGRATION.md`.
 
-Inspected from the private `main` branch on 2026-09-21.
-
-Relevant files included:
-
-```text
-internal/oidc/client.go
-internal/oidc/client_test.go
-internal/oidc/flow.go
-internal/appserver/auth.go
-internal/config/config.go
-db/000_base_schema.sql
-deploy/production/bootstrap-oidc.sql
-```
-
-The resulting binding compatibility decisions are in
-`docs/BDCMAPS_INTEGRATION.md`.
-
-Most notably:
-
-- Authorization Code + PKCE S256 is already implemented by the client.
-- It performs discovery and JWKS-based ID-token validation.
-- The configurable group claim defaults to `groups`.
-- Fresh database OIDC scopes default to `openid profile email`, so `groups`
-  must be added when role mapping is desired.
-- The token exchange currently sends `client_secret` in the form body, so
-  `authd` supports `client_secret_post` for compatibility.
-- The callback path is `/auth/callback`.
+The first relying-party source inspection was BDC Maps on 2026-09-21. Its
+application-specific setup and later authorization migration are documented in
+the BDC repository. The dated real-app result remains in `VALIDATION.md`.
 
 ## yellowman/liminal
 

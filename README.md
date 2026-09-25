@@ -1,8 +1,10 @@
 # authd
 
-**One place to manage people, passwords, MFA, and application sign-in.**
-A small Go service backed by PostgreSQL, with a server-rendered administration UI.
-No LDAP, user YAML, frontend build system, or external policy service.
+**authd is a self-hosted OpenID Connect (OIDC) provider and OAuth 2.0
+authorization server for human sign-in to applications.** Built in Go and backed
+by PostgreSQL, it provides one place to manage people, passwords, MFA, clients,
+and access grants. Its account and administration pages are server-rendered; it
+requires no LDAP, user YAML, frontend build system, or external policy service.
 
 ## Start here
 
@@ -13,14 +15,26 @@ No LDAP, user YAML, frontend build system, or external policy service.
 | Browse all documentation / explain a field | **Administration → Documentation**, [field reference](docs/FIELD_REFERENCE.md) |
 | Use a Unix socket behind nginx | [Unix sockets](docs/UNIX_SOCKET.md) |
 | Integrate another application | [RP integration contract](docs/RP_INTEGRATION.md) |
+| Design a new application's scopes, roles and access checks | [Application integration blueprint](docs/APPLICATION_INTEGRATION.md) |
 | Upgrade an installed server | [Upgrade procedure](DEPLOYMENT.md#13-updating-an-existing-installation) |
 | Find changes and test coverage | [Changelog](CHANGELOG.md), [validation record](VALIDATION.md) |
 
 ## What it does
 
-Create a **user** for each person. Register a **client** for each application.
-Assign **roles** to people. Applications can either map those role names to their
-own roles, or request/check fine-grained **permission scopes**.
+Applications connect through OIDC and OAuth 2.0. authd supports discovery,
+Authorization Code with PKCE, signed ID and access tokens with public verification
+keys (JWKS), UserInfo, consent, and rotating refresh tokens where enabled. People
+sign in with a password and, when required, a TOTP authenticator or recovery code.
+Administrators manage users, clients, sessions, signing keys, and audit history
+from the web interface.
+
+Create a **user** for each person and register a **client** for each application.
+**Roles** bundle permissions; **groups** assign roles to people, who may also hold
+roles directly. An application requests OAuth scopes. authd grants an application
+permission scope only when the client requests it, the client is allowed to
+request it, and the user holds it. Applications can instead map role names to
+their own roles. In either case, the application enforces its own access rules
+for customers, projects, records, and other resources.
 
 ```text
 Person opens an application
@@ -34,32 +48,33 @@ A role-name integration does **not** require a new permission catalog. authd's
 `system-admin` role manages authd, not every application. A client secret belongs in the application's backend configuration, not a user's login.
 The browser UI explains those distinctions beside the controls.
 
+Standard OAuth Dynamic Client Registration lets applications register through
+discovery and declare scopes. authd's explicit extension can turn
+application-prefixed scopes into permissions and create initial role and group
+templates. Registration does not assign any person to a role or group. See
+[Building an OIDC client](docs/APP_CREATOR_OIDC.md) for the standard protocol
+and authd-specific behavior.
+
 Identity is `(issuer, subject)`, never email alone. Customer/tenant/PBX/project/room
 membership stays in the application. An enabled account is not automatically a
 member of every app. Conversely, a client that requests only identity may
 authenticate any enabled authd user; there is no separate client allowed-users
 list. Read the [operator guide](OPERATOR_GUIDE.md) before choosing a policy.
 
-## Current release: v0.9.5
+## Documentation and validation
 
-Start here now renders a generic **Adding an app to authd** workflow from Markdown.
+Start here renders a generic **Adding an app to authd** workflow from Markdown.
 Documentation is an authenticated portal for the complete shipped product docs,
 with full-text search, heading navigation, original source and internal links.
-The index now lists the actual Markdown filenames grouped by directory. Titles
+The index lists the actual Markdown filenames grouped by directory. Titles
 come from Markdown headings; new or renamed files need no catalog-code edit.
 Client forms and saved connection help are generic for every application, with
-no client-ID-specific links or configuration advice. The unshaded SVG sidebar
-and existing field explanations remain unchanged.
+no client-ID-specific links or configuration advice.
 
 **One complete application integration is verified: bdcmaps.** The operator
 reported a successful full login through the real application after v0.9.3.
 [Recorded evidence](docs/validation/v0.9.3/external-bdcmaps-report.md) distinguishes
 that completed RP login from provider-only tests and independent conformance.
-
-This update changes only documentation/UI and its renderer/tests. OIDC, identity,
-PostgreSQL, crypto, listeners, dependency locks and service definitions are
-unchanged. Build/install/restart to serve the new UI; no migration, rebootstrap,
-secret/key rotation or callback reconfiguration is required.
 
 ## Build and test
 
@@ -97,10 +112,11 @@ than using these targets as a substitute for initial database/service setup.
 
 ## Boundaries
 
-Authorization Code + PKCE, RS256, TOTP/recovery, consent, rotating refresh tokens,
-UserInfo, and RP-initiated logout are implemented. Back-channel logout, upstream
-OIDC/SAML federation, RADIUS/TACACS, passkeys, and machine-identity grants are not
-implemented. Other apps may accept their own trusted providers directly.
+authd is not a customer-membership database or a replacement for application
+authorization. It does not currently provide LDAP synchronization, upstream
+identity federation, SAML, RADIUS/TACACS+, passkeys, machine-identity grants,
+or back-channel logout. Other apps may accept their own trusted providers
+directly. RP-initiated logout is implemented.
 
 `SPEC.md` states the contract; `ARCHITECTURE.md` describes ownership boundaries;
 `DESIGN_LANGUAGE.md` guides UI changes. The prior externally reported v0.9.0

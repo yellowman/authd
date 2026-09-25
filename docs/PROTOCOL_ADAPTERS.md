@@ -7,6 +7,7 @@ The core owns:
 ```text
 users
 credentials
+groups
 roles
 permissions
 MFA state
@@ -29,8 +30,9 @@ protocol to support.
 ## OIDC
 
 OIDC is implemented in-process and is the authoritative web SSO interface.
-Application permissions are OAuth scopes. `groups` and `roles` are views of the
-same role assignments.
+Application permissions are OAuth scopes. Users get roles directly or through
+groups. The optional `groups` and `roles` claims both expose effective role
+**names**, not the administrative group names.
 
 ## Protocol peer registrations
 

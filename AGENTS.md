@@ -7,7 +7,7 @@
 - One Go service for OIDC, local identity, and the web UI until a concrete
   deployment boundary proves otherwise.
 - PostgreSQL is the only required state service.
-- Users, roles, permissions, clients, and protocol mappings are database state,
+- Users, groups, roles, permissions, clients, and protocol mappings are database state,
   not configuration-file state.
 - OIDC is a protocol frontend. It does not own the identity model.
 - Future RADIUS/TACACS+ support consumes the same identity core.
@@ -51,8 +51,9 @@ registration records rather than a discriminator on the existing client table.
 - Never log query strings, passwords, authorization codes, bearer tokens,
   refresh tokens, client secrets, TOTP seeds, recovery codes, or bootstrap tokens.
 - Admin authorization is checked server-side with `system.admin`.
-- `groups` and `roles` are claim aliases over roles; do not introduce a second
-  group hierarchy.
+- `groups` and `roles` claims expose effective **role names**, including roles
+  inherited from actual authd groups. Do not conflate claim values with group
+  names or introduce nested groups.
 
 ## UI
 
@@ -70,9 +71,10 @@ Follow `DESIGN_LANGUAGE.md`:
 ## Tests
 
 Every security invariant gets a failing regression witness before the code is
-considered complete. The bdcmaps compatibility profile in
-`docs/BDCMAPS_INTEGRATION.md` is the first externally verified real application
-login. Keep that evidence distinct from unit fixtures and untested scenarios.
+considered complete. `docs/APPLICATION_INTEGRATION.md` is the reusable
+application contract. The first externally verified real application login is
+dated evidence in `VALIDATION.md`; do not extend that evidence to a later
+authorization-method migration without a new application-level test.
 
 ## Operator interface and native forms
 
