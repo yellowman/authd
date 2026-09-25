@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/yellowman/authd/internal/config"
+	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/db"
 	"github.com/yellowman/authd/internal/identity"
 	"github.com/yellowman/authd/internal/listener"
@@ -31,8 +32,9 @@ func main() {
 }
 
 func run() error {
-	if len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap" && os.Args[1] != "migrate") {
-		return errors.New("usage: authd [bootstrap|migrate]")
+	registrationTokenCommand := len(os.Args) == 3 && os.Args[1] == "registration-token"
+	if !registrationTokenCommand && (len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "bootstrap" && os.Args[1] != "migrate")) {
+		return errors.New("usage: authd [bootstrap|migrate|registration-token SCOPE_PREFIX]")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -55,6 +57,34 @@ func run() error {
 			return fmt.Errorf("database migration failed: %w", err)
 		}
 		fmt.Fprintln(os.Stdout, "database schema is current")
+		return nil
+	}
+	if registrationTokenCommand {
+		prefix := os.Args[2]
+		if !oidc.ValidRegistrationPrefix(prefix) {
+			return errors.New("registration token scope prefix must be a lowercase namespace ending in a dot, e.g. inventory.")
+		}
+		dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+		if dsn == "" {
+			return errors.New("DATABASE_URL is required")
+		}
+		pool, err := db.Open(ctx, dsn)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		if err := db.CheckSchema(ctx, pool); err != nil {
+			return err
+		}
+		token, err := cryptoutil.RandomToken(32)
+		if err != nil {
+			return err
+		}
+		if err := db.IssueInitialRegistrationToken(ctx, pool, identity.Hash(token), prefix, time.Now().Add(15*time.Minute)); err != nil {
+			return err
+		}
+		// One-time credential: only the issuing terminal sees the plaintext.
+		fmt.Fprintln(os.Stdout, token)
 		return nil
 	}
 

@@ -16,11 +16,12 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 		if e := tx.QueryRowContext(ctx, `SELECT
          (SELECT count(*) FROM (SELECT 1 FROM users WHERE deleted_at IS NULL LIMIT 201) q)>200 OR
          (SELECT count(*) FROM (SELECT 1 FROM roles LIMIT 201) q)>200 OR
+         (SELECT count(*) FROM (SELECT 1 FROM groups LIMIT 201) q)>200 OR
          (SELECT count(*) FROM (SELECT 1 FROM permissions LIMIT 201) q)>200`).Scan(&tooMany); e != nil {
 			return e
 		}
 		if tooMany {
-			return identity.Invalid("This early admin UI supports at most 200 users, roles, or permissions. Pagination is required before editing a larger catalog; no partial assignment list is shown.")
+			return identity.Invalid("This early admin UI supports at most 200 users, groups, roles, or permissions. Pagination is required before editing a larger catalog; no partial assignment list is shown.")
 		}
 		rows, e := tx.QueryContext(ctx, `SELECT `+userColumns+`,
  COALESCE((SELECT json_agg(ur.role_id::text ORDER BY ur.role_id) FROM user_roles ur WHERE ur.user_id=u.id),'[]'::json)::text,
@@ -76,6 +77,35 @@ func (s *IdentityStore) AdminData(ctx context.Context, hash []byte) (out identit
 				return e
 			}
 			out.Roles = append(out.Roles, role)
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return e
+		}
+		rows, e = tx.QueryContext(ctx, `SELECT g.id::text,g.name,g.description,g.updated_at,
+ COALESCE((SELECT json_agg(gr.role_id::text ORDER BY gr.role_id) FROM group_roles gr WHERE gr.group_id=g.id),'[]'::json)::text,
+ COALESCE((SELECT json_agg(ug.user_id::text ORDER BY ug.user_id) FROM user_groups ug WHERE ug.group_id=g.id),'[]'::json)::text
+ FROM groups g ORDER BY g.name LIMIT 200`)
+		if e != nil {
+			return e
+		}
+		for rows.Next() {
+			var group identity.Group
+			var roleIDs, userIDs string
+			if e = rows.Scan(&group.ID, &group.Name, &group.Description, &group.UpdatedAt, &roleIDs, &userIDs); e != nil {
+				rows.Close()
+				return e
+			}
+			if group.RoleIDs, e = decodeList(roleIDs); e != nil {
+				rows.Close()
+				return e
+			}
+			if group.UserIDs, e = decodeList(userIDs); e != nil {
+				rows.Close()
+				return e
+			}
+			out.Groups = append(out.Groups, group)
 		}
 		e = rows.Err()
 		rows.Close()

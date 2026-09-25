@@ -158,7 +158,11 @@ func TestHTTPSProxyToUnixLoginCookiesAndIdentity(t *testing.T) {
 	if !found {
 		t.Fatal("no secure session cookie")
 	}
-	insecure, _ := url.Parse(strings.Replace(proxy.URL, "https://", "http://", 1))
+	// Go's CookieJar treats loopback HTTP as a secure origin. Test the same
+	// response cookies under a non-loopback host to assert production behavior.
+	productionHTTPS, _ := url.Parse("https://auth.example.test/")
+	client.Jar.SetCookies(productionHTTPS, resp.Cookies())
+	insecure, _ := url.Parse("http://auth.example.test/")
 	for _, c := range client.Jar.Cookies(insecure) {
 		if c.Name == "__Host-authd_session" {
 			t.Fatal("secure cookie leaked to HTTP")

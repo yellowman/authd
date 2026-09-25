@@ -30,7 +30,7 @@ func TestEveryProductMarkdownFileIsEmbeddedAndRenderable(t *testing.T) {
 		if !strings.EqualFold(filepath.Ext(name), ".md") {
 			return nil
 		}
-		wanted := !strings.Contains(name, "/") || strings.HasPrefix(name, "docs/") || strings.HasPrefix(name, "deploy/")
+		wanted := name != "SPEC.md" && (!strings.Contains(name, "/") || strings.HasPrefix(name, "docs/") || strings.HasPrefix(name, "deploy/"))
 		if !wanted {
 			return nil
 		}
@@ -58,7 +58,7 @@ func TestEveryProductMarkdownFileIsEmbeddedAndRenderable(t *testing.T) {
 	if strings.Contains(strings.ToLower(start.Source), "bdc") {
 		t.Fatal("generic landing workflow must not be an app-specific profile")
 	}
-	for _, name := range []string{".env.example", "go.mod", ".git/config", "internal/web/server.go", "master.key", "../DEPLOYMENT.md", "deploy/openbsd/authd.env.example", "deploy/openbsd/authd-run", "deploy/postgresql/create-database.sql"} {
+	for _, name := range []string{"SPEC.md", ".env.example", "go.mod", ".git/config", "internal/web/server.go", "master.key", "../DEPLOYMENT.md", "deploy/openbsd/authd.env.example", "deploy/openbsd/authd-run", "deploy/postgresql/create-database.sql"} {
 		if _, ok := library.Source(name); ok {
 			t.Errorf("published non-documentation file %q", name)
 		}

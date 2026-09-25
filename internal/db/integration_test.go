@@ -18,6 +18,7 @@ import (
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/db"
 	"github.com/yellowman/authd/internal/identity"
+	"github.com/yellowman/authd/internal/oidc"
 )
 
 // This is a real-database repository suite. Password hashes are opaque fixture
@@ -163,6 +164,47 @@ func findUser(t *testing.T, data identity.AdminData, username string) identity.U
 	}
 	t.Fatal("missing user", username)
 	return identity.User{}
+}
+
+func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
+	s, ctx := postgres(t)
+	_, actor := bootstrap(t, ctx, s)
+	// The registration token is a one-use namespace authority, not a user grant.
+	raw := token(t)
+	require(t, db.IssueInitialRegistrationToken(ctx, s.DB, identity.Hash(raw), "bdcmaps.", time.Now().Add(15*time.Minute)))
+	oidcStore := &db.OIDCStore{DB: s.DB}
+	client, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "dcr-test", Name: "BDC Maps", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid", "profile", "email"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read", "bdcmaps.site.write"}, auditFixture)
+	require(t, err)
+	if !client.DynamicRegistration || len(client.Permissions) != 2 {
+		t.Fatalf("registered client missing scoped permissions: %#v", client)
+	}
+	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(raw), oidc.ClientEdit{ClientID: "replay", Name: "Replay", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture); !errors.Is(err, oidc.ErrRegistrationTokenUsed) {
+		t.Fatalf("replayed registration token: %v", err)
+	}
+	other := token(t)
+	require(t, db.IssueInitialRegistrationToken(ctx, s.DB, identity.Hash(other), "inventory.", time.Now().Add(15*time.Minute)))
+	if _, err := oidcStore.RegisterDynamicClient(ctx, identity.Hash(other), oidc.ClientEdit{ClientID: "wrong-prefix", Name: "Wrong", Type: "confidential", Enabled: true, AccessTokenTTL: 5 * time.Minute, RedirectURIs: []string{"https://maps.example.test/auth/callback"}, IdentityScopes: []string{"openid"}}, identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture); err == nil {
+		t.Fatal("namespace-limited token registered foreign permission")
+	}
+	data, err := s.AdminData(ctx, actor.TokenHash)
+	require(t, err)
+	read := findPermission(t, data, "bdcmaps.site.read")
+	require(t, s.SaveRole(ctx, actor.TokenHash, identity.RoleEdit{Name: "bdcmaps.operator", PermissionIDs: []string{read.ID}}, auditFixture))
+	require(t, s.CreateUser(ctx, actor.TokenHash, identity.NewUser{Profile: identity.Profile{Username: "alice", Email: "alice@example.test"}, PasswordHash: "test-hash"}, auditFixture))
+	data, err = s.AdminData(ctx, actor.TokenHash)
+	require(t, err)
+	role := findRole(t, data, "bdcmaps.operator")
+	user := findUser(t, data, "alice")
+	require(t, s.SaveGroup(ctx, actor.TokenHash, identity.GroupEdit{Name: "network.operations", RoleIDs: []string{role.ID}, UserIDs: []string{user.ID}}, auditFixture))
+	rec, err := s.LoginRecord(ctx, "alice")
+	require(t, err)
+	userSession := sessionFixture(t, rec, "pwd")
+	require(t, s.CreateSession(ctx, rec, userSession, nil, "", auditFixture))
+	userSession, err = s.Session(ctx, userSession.TokenHash, time.Hour)
+	require(t, err)
+	if !userSession.Has("bdcmaps.site.read") || userSession.Has("bdcmaps.site.write") {
+		t.Fatalf("group leaked or lost permissions: %v", userSession.Permissions)
+	}
 }
 func TestPostgresIdentityLifecycle(t *testing.T) {
 	s, ctx := postgres(t)

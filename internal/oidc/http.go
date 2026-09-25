@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"mime"
 	"net"
@@ -41,11 +42,73 @@ func (h *HTTP) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /userinfo", h.userinfo)
 	mux.HandleFunc("POST /userinfo", h.userinfo)
 	mux.HandleFunc("POST /revoke", h.revoke)
+	mux.HandleFunc("POST /register", h.register)
 	mux.HandleFunc("OPTIONS /token", h.preflight("POST"))
 	mux.HandleFunc("OPTIONS /userinfo", h.preflight("GET, POST"))
 	mux.HandleFunc("OPTIONS /revoke", h.preflight("POST"))
 	mux.HandleFunc("GET /logout", h.logout)
 	mux.HandleFunc("POST /logout", h.logout)
+}
+
+func (h *HTTP) register(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.service == nil {
+		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration unavailable")
+		return
+	}
+	if !h.limiter.Allow("register:"+auditFromRequest(r).IP, 10, time.Minute) {
+		h.oauthError(w, http.StatusTooManyRequests, "invalid_request", "registration rate limited")
+		return
+	}
+	authorization := r.Header.Get("Authorization")
+	scheme, token, ok := strings.Cut(authorization, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" || strings.ContainsAny(token, " \t\r\n") {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.oauthError(w, http.StatusUnauthorized, "invalid_token", "initial registration token required")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		h.oauthError(w, http.StatusUnsupportedMediaType, "invalid_client_metadata", "application/json required")
+		return
+	}
+	var request RegistrationRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	if err := decoder.Decode(&request); err != nil {
+		h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration JSON")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration must be one JSON object")
+		return
+	}
+	response, err := h.service.RegisterDynamicClient(r.Context(), token, request, auditFromRequest(r))
+	if err != nil {
+		if errors.Is(err, ErrRegistrationTokenUsed) || errors.Is(err, ErrInvalidClient) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			h.oauthError(w, http.StatusUnauthorized, "invalid_token", "initial registration token is invalid")
+			return
+		}
+		if errors.Is(err, ErrRegistrationNotSupported) {
+			h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration unavailable")
+			return
+		}
+		if errors.Is(err, identity.ErrForbidden) || errors.Is(err, identity.ErrConflict) {
+			h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration rejected")
+			return
+		}
+		var inputErr *identity.InputError
+		if errors.As(err, &inputErr) {
+			h.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", inputErr.Error())
+			return
+		}
+		h.oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "registration unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *HTTP) Pending(ctx context.Context, raw, browserRaw string) (clientName, loginHint string, ok bool) {

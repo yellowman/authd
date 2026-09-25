@@ -14,6 +14,7 @@ type Client struct {
 	Enabled              bool
 	RequireMFA           bool
 	RefreshTokensEnabled bool
+	DynamicRegistration  bool
 	AccessTokenTTL       time.Duration
 	RedirectURIs         []string
 	LogoutURIs           []string

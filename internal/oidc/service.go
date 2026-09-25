@@ -339,6 +339,11 @@ func subjectCanGrant(session identity.Session, client Client, scopes []string) b
 	if client.RequireMFA && !meetsACR(session.AuthMethods, ACRMFA) {
 		return false
 	}
+	if client.DynamicRegistration {
+		// The code transaction intersects requested capabilities with live role
+		// permissions; registration never grants a capability to a user.
+		return true
+	}
 	perm := make(map[string]bool, len(session.Permissions))
 	for _, p := range session.Permissions {
 		perm[p] = true

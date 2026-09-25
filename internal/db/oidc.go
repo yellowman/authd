@@ -21,7 +21,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	var c oidc.Client
 	var ttl int64
 	var redirects, logouts, identityScopes, permissionIDs, permissions string
-	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &ttl, &c.UpdatedAt, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
+	err := row.Scan(&c.ID, &c.ClientID, &c.Name, &c.Type, &c.SecretHash, &c.Enabled, &c.RequireMFA, &c.RefreshTokensEnabled, &c.DynamicRegistration, &ttl, &c.UpdatedAt, &redirects, &logouts, &identityScopes, &permissionIDs, &permissions)
 	if err != nil {
 		return c, err
 	}
@@ -44,7 +44,7 @@ func scanClient(row scanner) (oidc.Client, error) {
 	return c, nil
 }
 
-const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.access_token_ttl_seconds,c.updated_at,
+const clientColumns = `c.id::text,c.client_id,c.name,c.client_type,c.client_secret_hash,c.enabled,c.require_mfa,c.refresh_tokens_enabled,c.dynamic_registration,c.access_token_ttl_seconds,c.updated_at,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_redirect_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.uri ORDER BY x.uri) FROM client_logout_uris x WHERE x.client_id=c.id),'[]'::json)::text,
  COALESCE((SELECT json_agg(x.scope ORDER BY x.scope) FROM client_identity_scopes x WHERE x.client_id=c.id),'[]'::json)::text,
@@ -223,12 +223,25 @@ func subjectAllows(subject oidc.Subject, scopes []string) bool {
 	return true
 }
 
+func grantedScopes(subject oidc.Subject, requested []string) []string {
+	perms := permissionSet(subject.Permissions)
+	granted := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		if knownIdentityScope(scope) || perms[scope] {
+			granted = append(granted, scope)
+		}
+	}
+	return granted
+}
+
 func subjectByUserID(ctx context.Context, tx *sql.Tx, userID string) (oidc.Subject, error) {
 	var out oidc.Subject
 	var roles, permissions string
 	err := tx.QueryRowContext(ctx, `SELECT u.id::text,u.username,u.display_name,COALESCE(u.email,''),u.email_verified,u.enabled,
- COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text,
- COALESCE((SELECT json_agg(x.name ORDER BY x.name) FROM (SELECT DISTINCT p.name FROM user_roles ur JOIN role_permissions rp ON rp.role_id=ur.role_id JOIN permissions p ON p.id=rp.permission_id WHERE ur.user_id=u.id) x),'[]'::json)::text
+ COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM roles r WHERE r.id IN
+   (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id=u.id UNION SELECT gr.role_id FROM user_groups ug JOIN group_roles gr ON gr.group_id=ug.group_id WHERE ug.user_id=u.id)),'[]'::json)::text,
+ COALESCE((SELECT json_agg(x.name ORDER BY x.name) FROM (SELECT DISTINCT p.name FROM roles r JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id
+   WHERE r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id=u.id UNION SELECT gr.role_id FROM user_groups ug JOIN group_roles gr ON gr.group_id=ug.group_id WHERE ug.user_id=u.id)) x),'[]'::json)::text
  FROM users u WHERE u.id=$1::uuid AND u.enabled AND NOT u.force_password_change AND u.deleted_at IS NULL`, userID).Scan(&out.ID, &out.Username, &out.DisplayName, &out.Email, &out.EmailVerified, &out.Enabled, &roles, &permissions)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, oidc.ErrAccessDenied
@@ -282,21 +295,25 @@ func (s *OIDCStore) IssueAuthorizationCode(ctx context.Context, requestHash, bro
 		}
 		subject := subjectFromSession(sess)
 		subject.ACR = oidc.ResultACR(req, sess.AuthMethods)
-		if !clientAllows(client, req.Scopes) || !subjectAllows(subject, req.Scopes) || !oidc.ClientAllowsClaims(client, req.Claims) {
+		if !clientAllows(client, req.Scopes) || (!client.DynamicRegistration && !subjectAllows(subject, req.Scopes)) || !oidc.ClientAllowsClaims(client, req.Claims) {
 			return oidc.ErrAccessDenied
+		}
+		issuedScopes := req.Scopes
+		if client.DynamicRegistration {
+			issuedScopes = grantedScopes(subject, req.Scopes)
 		}
 		if !expires.After(now) || expires.After(now.Add(time.Minute)) {
 			return oidc.ErrInvalidRequest
 		}
 		_, e = tx.ExecContext(ctx, `INSERT INTO authorization_codes(code_hash,client_id,user_id,redirect_uri,scopes,nonce,code_challenge,auth_time,auth_methods,expires_at,session_id,acr,claims)
- VALUES($1,$2::uuid,$3::uuid,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),NULLIF($6,''),$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),$10,$11::uuid,$12,$13::jsonb)`, codeHash, client.ID, subject.ID, req.RedirectURI, listJSON(req.Scopes), req.Nonce, req.CodeChallenge, sess.AuthTime, listJSON(sess.AuthMethods), expires, sess.ID, subject.ACR, claimsJSON(req.Claims))
+ VALUES($1,$2::uuid,$3::uuid,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),NULLIF($6,''),$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),$10,$11::uuid,$12,$13::jsonb)`, codeHash, client.ID, subject.ID, req.RedirectURI, listJSON(issuedScopes), req.Nonce, req.CodeChallenge, sess.AuthTime, listJSON(sess.AuthMethods), expires, sess.ID, subject.ACR, claimsJSON(req.Claims))
 		if e != nil {
 			return e
 		}
 		if _, e = tx.ExecContext(ctx, `DELETE FROM authorization_requests WHERE request_hash=$1`, requestHash); e != nil {
 			return e
 		}
-		out = oidc.CodeGrant{Claims: req.Claims, Client: client, Subject: subject, RedirectURI: req.RedirectURI, Scopes: req.Scopes, Nonce: req.Nonce}
+		out = oidc.CodeGrant{Claims: req.Claims, Client: client, Subject: subject, RedirectURI: req.RedirectURI, Scopes: issuedScopes, Nonce: req.Nonce}
 		return nil
 	})
 	return

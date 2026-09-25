@@ -16,6 +16,7 @@ type Metadata struct {
 	UserinfoEndpoint                           string   `json:"userinfo_endpoint"`
 	JWKSURI                                    string   `json:"jwks_uri"`
 	RevocationEndpoint                         string   `json:"revocation_endpoint"`
+	RegistrationEndpoint                       string   `json:"registration_endpoint"`
 	EndSessionEndpoint                         string   `json:"end_session_endpoint"`
 	ResponseTypesSupported                     []string `json:"response_types_supported"`
 	GrantTypesSupported                        []string `json:"grant_types_supported"`
@@ -41,6 +42,7 @@ func NewMetadata(issuer string) Metadata {
 		UserinfoEndpoint:                       issuer + "/userinfo",
 		JWKSURI:                                issuer + "/jwks.json",
 		RevocationEndpoint:                     issuer + "/revoke",
+		RegistrationEndpoint:                   issuer + "/register",
 		EndSessionEndpoint:                     issuer + "/logout",
 		ResponseTypesSupported:                 []string{"code"},
 		GrantTypesSupported:                    []string{"authorization_code", "refresh_token"},

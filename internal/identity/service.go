@@ -264,6 +264,30 @@ func (s *Service) SaveRole(ctx context.Context, actor string, edit RoleEdit, a A
 	}
 	return s.Store.SaveRole(ctx, Hash(actor), edit, a)
 }
+func (s *Service) SaveGroup(ctx context.Context, actor string, edit GroupEdit, a Audit) error {
+	if edit.ID != "" && !ValidID(edit.ID) {
+		return Invalid("invalid group ID")
+	}
+	if edit.ID != "" && edit.ExpectedUpdatedAt.IsZero() {
+		return Invalid("missing group version")
+	}
+	if err := ValidatePermissionName(edit.Name, edit.Description); err != nil {
+		return err
+	}
+	if err := ValidateIDs(edit.RoleIDs); err != nil {
+		return err
+	}
+	if err := ValidateIDs(edit.UserIDs); err != nil {
+		return err
+	}
+	return s.Store.SaveGroup(ctx, Hash(actor), edit, a)
+}
+func (s *Service) DeleteGroup(ctx context.Context, actor, id string, a Audit) error {
+	if !ValidID(id) {
+		return Invalid("invalid group ID")
+	}
+	return s.Store.DeleteGroup(ctx, Hash(actor), id, a)
+}
 func (s *Service) CreatePermission(ctx context.Context, actor, name, description string, a Audit) error {
 	if err := ValidatePermissionName(name, description); err != nil {
 		return err

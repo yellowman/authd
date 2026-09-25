@@ -59,6 +59,7 @@ type pageData struct {
 	Sessions                                                                                                                     []identity.Session
 	SelectedUser                                                                                                                 *identity.User
 	SelectedRole                                                                                                                 *identity.Role
+	SelectedGroup                                                                                                                *identity.Group
 	SelectedPermission                                                                                                           *identity.Permission
 	OIDCClients                                                                                                                  []oidc.Client
 	SelectedClient                                                                                                               *oidc.Client
@@ -139,6 +140,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /admin/users/delete", s.deleteUser)
 	mux.HandleFunc("POST /admin/roles/save", s.saveRole)
 	mux.HandleFunc("POST /admin/roles/delete", s.deleteRole)
+	mux.HandleFunc("POST /admin/groups/save", s.saveGroup)
+	mux.HandleFunc("POST /admin/groups/delete", s.deleteGroup)
 	mux.HandleFunc("POST /admin/permissions/create", s.createPermission)
 	mux.HandleFunc("POST /admin/permissions/save", s.savePermission)
 	mux.HandleFunc("POST /admin/permissions/delete", s.deletePermission)

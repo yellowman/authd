@@ -64,19 +64,27 @@ Ancestors must be root-controlled or daemon-controlled; use a local runtime
 filesystem, not a shared writable directory or a network filesystem.
 
 Create `authd_proxy` only if it does not already exist. Substitute the **actual
-nginx worker account**, not the master process's root account, in these commands.
-The `www` and `www-data` names below are examples, not autodetection.
+proxy worker account**, not the master process's root account, in these commands.
+The `www` and `www-data` names below are examples, not autodetection. Check the
+running worker's groups, not just the account database: an OpenBSD nginx worker
+may retain only its primary `www` group after startup. In that case, a
+supplementary `authd_proxy` membership does not grant socket access. Use the
+worker's actual primary group for `AUTHD_UNIX_GROUP` and add `_authd` to that
+group, while keeping authd's private env and key files in `_authd`.
 
-OpenBSD:
+OpenBSD with an nginx worker whose effective group is `www`:
 
 ```sh
-doas groupadd authd_proxy                 # first creation only
-doas usermod -G authd_proxy _authd
-proxy_user=www                            # verify in this site's nginx config
-doas usermod -G authd_proxy "$proxy_user"
+doas usermod -G www _authd
+# In /etc/authd/authd.env:
+AUTHD_UNIX_GROUP='www'
+AUTHD_UNIX_MODE='0660'
 ```
 
-OpenBSD `usermod -G` appends supplementary groups. On Linux use `-aG` instead:
+OpenBSD `usermod -G` appends supplementary groups. Review other resources
+accessible to the proxy group before adding `_authd`; if that would be too
+broad, use a separately designed proxy group and make the actual worker run
+with that group. On Linux use `-aG` instead:
 
 ```sh
 sudo groupadd --system authd_proxy        # first creation only
@@ -85,9 +93,10 @@ proxy_user=www-data                       # or nginx / the actual worker account
 sudo usermod -aG authd_proxy "$proxy_user"
 ```
 
-Restart affected services so running processes acquire the new supplementary
-groups. A fresh shell's `id` output alone does not prove a running worker has
-them. Confirm the actual worker can connect. Never solve an access error with
+Restart affected services so running processes acquire the new groups. A fresh
+shell's `id` output alone does not prove a running worker has them. On OpenBSD,
+`ps -p WORKER_PID -o user,group,supgrp` shows the running groups. Confirm the
+actual worker can connect. Never solve an access error with
 `chmod 0666` or a shared writable socket directory.
 
 ## Linux / systemd
@@ -157,7 +166,7 @@ AUTHD_LISTEN='unix:/var/www/run/authd/authd.sock'
 The rc.d step creates the final `authd` directory beneath the existing controlled
 parent. Set nginx's upstream to its **chroot-relative** `/run/authd/authd.sock`.
 Do not create a symlink to a host path outside the chroot; it cannot escape the
-worker's filesystem root. Keep the separate proxy group and socket mode policy.
+worker's filesystem root. Keep the socket group/mode policy above.
 A non-chrooted proxy instead uses the ordinary host path. The release does not
 assume every OpenBSD nginx deployment is chrooted.
 

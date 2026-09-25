@@ -75,6 +75,7 @@ func adminNavigation(view string) []navigationEntry {
 		{Label: "Documentation", Icon: "docs", Href: "/admin/docs", Current: view == "docs"},
 		{Label: "Users", Icon: "users", Href: "/admin/?view=users", Current: view == "users"},
 		{Label: "Roles", Icon: "roles", Href: "/admin/?view=roles", Current: view == "roles"},
+		{Label: "Groups", Icon: "users", Href: "/admin/?view=groups", Current: view == "groups"},
 		{Label: "Permissions", Icon: "permissions", Href: "/admin/?view=permissions", Current: view == "permissions"},
 		{Label: "Clients", Icon: "clients", Href: "/admin/?view=clients", Current: view == "clients"},
 		{Label: "Sessions", Icon: "sessions", Href: "/admin/?view=sessions", Current: view == "sessions"},

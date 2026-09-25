@@ -15,7 +15,7 @@ import (
 func TestDocumentationRequiresLiveAdministrator(t *testing.T) {
 	for _, admin := range []bool{false, true} {
 		s, h, m := fixture(t, admin)
-		for _, p := range []string{"/admin/docs", "/admin/docs?doc=SPEC.md", "/admin/docs/raw?doc=SPEC.md"} {
+		for _, p := range []string{"/admin/docs", "/admin/docs?doc=README.md", "/admin/docs/raw?doc=README.md"} {
 			for _, authenticated := range []bool{false, true} {
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, request(s, m, "GET", p, nil, authenticated))
@@ -65,7 +65,7 @@ func TestEveryDocumentCanBeReadAndDownloaded(t *testing.T) {
 }
 func TestDocumentationTraversalAndQueryRefusal(t *testing.T) {
 	s, h, m := fixture(t, true)
-	for _, name := range []string{"../../etc/passwd", "/etc/passwd", "docs/../SPEC.md", "%2e%2e/SPEC.md", ".env.example", ".git/config", "go.mod", "missing.md", "docs\\ADDING_AN_APP.md"} {
+	for _, name := range []string{"SPEC.md", "../../etc/passwd", "/etc/passwd", "docs/../SPEC.md", "%2e%2e/SPEC.md", ".env.example", ".git/config", "go.mod", "missing.md", "docs\\ADDING_AN_APP.md"} {
 		for _, base := range []string{"/admin/docs?doc=", "/admin/docs/raw?doc="} {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, request(s, m, "GET", base+url.QueryEscape(name), nil, true))
@@ -89,17 +89,19 @@ func TestDocumentationTraversalAndQueryRefusal(t *testing.T) {
 }
 func TestSidebarUsesAccessibleSVGsAndCurrentPage(t *testing.T) {
 	s, h, m := fixture(t, true)
-	for _, view := range []string{"guide", "users", "roles", "permissions", "sessions", "audit"} {
+	for _, view := range []string{"guide", "users", "roles", "groups", "permissions", "sessions", "audit"} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, request(s, m, "GET", "/admin/?view="+view, nil, true))
 		rail := regexp.MustCompile(`(?s)<aside class="rail".*?</aside>`).FindString(w.Body.String())
-		if strings.Count(rail, "<svg ") != 11 {
-			t.Fatalf("rail needs 11 actual SVGs, got %d", strings.Count(rail, "<svg "))
+		// The rail has the admin entries plus its two fixed navigation links.
+		iconCount := len(adminNavigation(view)) + 2
+		if strings.Count(rail, "<svg ") != iconCount {
+			t.Fatalf("rail needs %d actual SVGs, got %d", iconCount, strings.Count(rail, "<svg "))
 		}
 		if strings.Count(rail, `aria-current="page"`) != 1 {
 			t.Fatal("rail must have exactly one active page")
 		}
-		if strings.Count(rail, `aria-hidden="true"`) != 11 || strings.Count(rail, `focusable="false"`) != 11 {
+		if strings.Count(rail, `aria-hidden="true"`) != iconCount || strings.Count(rail, `focusable="false"`) != iconCount {
 			t.Fatal("decorative SVG is not hidden from accessibility tree")
 		}
 		if regexp.MustCompile(`>[A-Z?@]</a>`).MatchString(rail) {

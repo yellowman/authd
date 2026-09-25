@@ -54,6 +54,11 @@ func New(src fs.FS) (*Library, error) {
 		if err != nil {
 			return err
 		}
+		// The specification remains in the repository but is not an operator
+		// document in the in-app catalog.
+		if name == "SPEC.md" {
+			return nil
+		}
 		if d.IsDir() {
 			return nil
 		}

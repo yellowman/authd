@@ -80,9 +80,15 @@ type AuditEvent struct {
 type AdminData struct {
 	Users       []User
 	Roles       []Role
+	Groups      []Group
 	Permissions []Permission
 	Sessions    []Session
 	Events      []AuditEvent
+}
+type GroupEdit struct {
+	ID, Name, Description string
+	RoleIDs, UserIDs      []string
+	ExpectedUpdatedAt     time.Time
 }
 type RoleEdit struct {
 	ID, Name, Description string
@@ -123,6 +129,8 @@ type Store interface {
 	ResetMFA(context.Context, []byte, string, Audit) error
 	SaveRole(context.Context, []byte, RoleEdit, Audit) error
 	DeleteRole(context.Context, []byte, string, Audit) error
+	SaveGroup(context.Context, []byte, GroupEdit, Audit) error
+	DeleteGroup(context.Context, []byte, string, Audit) error
 	CreatePermission(context.Context, []byte, string, string, Audit) error
 	SavePermission(context.Context, []byte, PermissionEdit, Audit) error
 	DeletePermission(context.Context, []byte, string, Audit) error

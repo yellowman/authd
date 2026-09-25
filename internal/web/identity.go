@@ -257,13 +257,13 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	d.CSRF = s.auth.CSRF(raw, "session")
 	d.View = r.URL.Query().Get("view")
 	switch d.View {
-	case "guide", "users", "roles", "permissions", "clients", "sessions", "keys", "audit":
+	case "guide", "users", "roles", "groups", "permissions", "clients", "sessions", "keys", "audit":
 	default:
 		d.View = "guide"
 	}
 	// The static guide needs a live admin identity, not a full catalog scan.
 	var data identity.AdminData
-	selected := r.URL.Query().Get("user") != "" || r.URL.Query().Get("role") != "" || r.URL.Query().Get("permission") != "" || r.URL.Query().Get("client") != ""
+	selected := r.URL.Query().Get("user") != "" || r.URL.Query().Get("role") != "" || r.URL.Query().Get("group") != "" || r.URL.Query().Get("permission") != "" || r.URL.Query().Get("client") != ""
 	if d.View != "guide" || selected {
 		var err error
 		data, err = s.auth.Store.AdminData(r.Context(), identity.Hash(raw))
@@ -324,6 +324,18 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.View = "roles"
+	}
+	if id := r.URL.Query().Get("group"); id != "" {
+		for i := range data.Groups {
+			if data.Groups[i].ID == id {
+				d.SelectedGroup = &data.Groups[i]
+			}
+		}
+		if d.SelectedGroup == nil {
+			http.NotFound(w, r)
+			return
+		}
+		d.View = "groups"
 	}
 	if id := r.URL.Query().Get("permission"); id != "" {
 		for i := range data.Permissions {
@@ -477,6 +489,42 @@ func (s *Server) deleteRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/?view=roles", http.StatusSeeOther)
+}
+func (s *Server) saveGroup(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	var version time.Time
+	var err error
+	if r.PostForm.Get("id") != "" {
+		version, err = editVersion(r)
+		if err != nil {
+			s.failure(w, r, err)
+			return
+		}
+	}
+	err = s.auth.SaveGroup(r.Context(), raw, identity.GroupEdit{ID: r.PostForm.Get("id"), Name: r.PostForm.Get("name"), Description: r.PostForm.Get("description"), RoleIDs: r.PostForm["roles"], UserIDs: r.PostForm["users"], ExpectedUpdatedAt: version}, auditInfo(w, r))
+	if err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=groups", http.StatusSeeOther)
+}
+func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
+	_, raw, ok := s.user(w, r, true, false)
+	if !ok {
+		return
+	}
+	if r.PostForm.Get("confirm") != "delete" {
+		s.failure(w, r, identity.Invalid("type delete to confirm group deletion"))
+		return
+	}
+	if err := s.auth.DeleteGroup(r.Context(), raw, r.PostForm.Get("id"), auditInfo(w, r)); err != nil {
+		s.failure(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/?view=groups", http.StatusSeeOther)
 }
 func splitLines(raw string) []string {
 	var out []string

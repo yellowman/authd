@@ -257,8 +257,10 @@ func (s *IdentityStore) CreateSession(ctx context.Context, expected identity.Log
 
 const sessionColumns = `s.id::text,s.token_hash,s.csrf_hash,s.auth_time,s.created_at,s.last_seen_at,s.idle_expires_at,s.absolute_expires_at,COALESCE(host(s.ip_address),''),s.user_agent,array_to_json(s.auth_methods)::text,` + userColumns + `,
  EXISTS(SELECT 1 FROM totp_credentials t WHERE t.user_id=u.id),
- COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id),'[]'::json)::text,
- COALESCE((SELECT json_agg(x.name ORDER BY x.name) FROM (SELECT DISTINCT p.name FROM user_roles ur JOIN role_permissions rp ON rp.role_id=ur.role_id JOIN permissions p ON p.id=rp.permission_id WHERE ur.user_id=u.id) x),'[]'::json)::text`
+ COALESCE((SELECT json_agg(r.name ORDER BY r.name) FROM roles r WHERE r.id IN
+   (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id=u.id UNION SELECT gr.role_id FROM user_groups ug JOIN group_roles gr ON gr.group_id=ug.group_id WHERE ug.user_id=u.id)),'[]'::json)::text,
+ COALESCE((SELECT json_agg(x.name ORDER BY x.name) FROM (SELECT DISTINCT p.name FROM roles r JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id
+   WHERE r.id IN (SELECT ur.role_id FROM user_roles ur WHERE ur.user_id=u.id UNION SELECT gr.role_id FROM user_groups ug JOIN group_roles gr ON gr.group_id=ug.group_id WHERE ug.user_id=u.id)) x),'[]'::json)::text`
 
 func scanSession(row scanner) (identity.Session, error) {
 	var s identity.Session

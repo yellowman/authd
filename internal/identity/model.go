@@ -28,6 +28,12 @@ type Role struct {
 	Permissions   []string
 }
 
+type Group struct {
+	ID, Name, Description string
+	UpdatedAt             time.Time
+	RoleIDs, UserIDs      []string
+}
+
 type Permission struct {
 	ID          string
 	Name        string
