@@ -74,7 +74,8 @@ Application permission scopes additionally require the user to hold them through
 a direct or group-derived role. A manually created client denies a request with
 a missing user permission. A dynamically registered client returns a narrower
 grant instead. Always check the granted scopes. Dynamic registration currently
-supports confidential code/PKCE clients without refresh tokens; see
+supports confidential code/PKCE clients with optional, explicitly requested
+refresh tokens; see
 [the OIDC client guide](APP_CREATOR_OIDC.md).
 
 ## Sessions, keys and audit

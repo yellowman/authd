@@ -131,8 +131,12 @@ For a manually configured client, request `openid offline_access` **and
 `prompt=consent`**, and configure that client
 to permit refresh tokens. The user must approve the browser-bound consent page.
 Without explicit consent, authd drops `offline_access` and issues no refresh
-credential. Dynamically registered authd clients do not currently receive
-refresh tokens. Inspect the actual response scopes and refresh-token presence.
+credential. Dynamically registered clients can opt in with standard
+`grant_types: ["authorization_code", "refresh_token"]` and `offline_access`
+in registration `scope`; refresh remains off by default. See
+[the client guide](APP_CREATOR_OIDC.md#optional-server-side-refresh) for managed
+client updates and compatibility. Inspect the actual response scopes and
+refresh-token presence.
 
 Keep refresh tokens server-side or in an appropriately protected client store.
 Serialize refresh per local RP session, including concurrent tabs/requests; adopt

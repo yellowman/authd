@@ -88,7 +88,9 @@ Registration** with an administrator-issued, one-use, prefix-limited token.
 The standard `scope` metadata registers its allowed scopes; authd interprets
 app-prefixed scopes as catalog permissions. Optional authd-specific role and
 group templates create unassigned access bundles. This path currently supports
-confidential code/PKCE clients without refresh tokens. Follow
+confidential code/PKCE clients; refresh is off by default and can be explicitly
+requested using standard `refresh_token` grant metadata plus `offline_access`.
+The app must implement secure rotation and request consent at login. Follow
 [Building an OIDC client](APP_CREATOR_OIDC.md) for the exact request and the
 boundary between standard protocol and authd extensions.
 

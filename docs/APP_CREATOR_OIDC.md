@@ -30,7 +30,7 @@ assume it creates a permission catalog, roles, or groups from registration.
 | --- | --- |
 | OIDC discovery, code + PKCE, token validation | Standard OIDC/OAuth |
 | DCR `scope`, `redirect_uris`, `client_name` | Standard [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591.html) metadata |
-| Per-client read/update URI and bearer management token | [RFC 7592](https://www.rfc-editor.org/rfc/rfc7592.html) shape; authd currently implements read and scope replacement, not delete or arbitrary metadata editing |
+| Per-client read/update URI and bearer management token | [RFC 7592](https://www.rfc-editor.org/rfc/rfc7592.html) shape; authd implements read, application-scope replacement, and refresh opt-in/out, not delete or arbitrary metadata editing |
 | Treat app-prefixed scopes as permissions | authd-specific policy |
 | `authd_role_templates`, `authd_group_templates`, groups, memberships | authd-specific extension; other OIDC servers need not support it |
 
@@ -99,8 +99,14 @@ registers confidential Authorization Code clients with PKCE (S256). It accepts
 requires the latter. Public DCR clients and implicit/hybrid flows are not
 implemented. The registration request may omit
 `grant_types`, `response_types`, and `token_endpoint_auth_method` to get the
-values above. Do not request `offline_access`: dynamically registered clients
-do not currently receive refresh tokens.
+values above: refresh is off by default. To opt in, request both
+`"grant_types": ["authorization_code", "refresh_token"]` and `offline_access`
+in `scope`. Requesting only one of the pair is rejected. This uses standard
+RFC 7591 metadata and OIDC offline access, not an authd extension. Older authd
+versions reject both; make refresh an explicit deployment option rather than
+assuming every provider accepts it. Inspect the registration response's actual
+`grant_types` and `scope`; discovery advertising refresh support is not a grant
+to this particular client.
 authd records the chosen client authentication method and requires that same
 method at its token and revocation endpoints. Scope updates do not change it.
 Registrations created before method recording retain their previous Basic/POST
@@ -173,12 +179,56 @@ if !accessToken.HasScope("networkmap.site.write") {
 Never treat the ID token's `groups`, `roles`, or email as equivalent to an
 application permission. Verify the token before reading its scope. If the
 application creates its own cookie session from a validated access token,
-carry only the validated grants into that session and expire it **no later
-than the access token**. The default dynamic-client access token lifetime is
-five minutes; a different lifetime can be set in authd's client administration.
-Without refresh-token support, re-run the code flow when it expires. Role
-changes do not retract an already-issued JWT; the maximum stale-grant window
-is the remaining token/session lifetime.
+carry only the validated grants into that session. Those grants must expire
+**no later than the access token**. Without refresh, the local session must end
+then too. The default dynamic-client access token lifetime is five minutes;
+a different lifetime can be set in authd's client administration. With refresh,
+the cookie session may last longer, bounded by the application's absolute
+session limit, but every operation must have an unexpired, validated grant.
+Role changes do not retract an already-issued JWT; the maximum stale-grant
+window is the remaining access-token lifetime, not the longer cookie lifetime.
+
+### Optional server-side refresh
+
+1. Register `authorization_code` plus `refresh_token`, with `openid` and
+   `offline_access` alongside the application's scopes. Existing managed clients
+   can opt in using the full metadata `PUT` described in section 7. No schema
+   upgrade or new client secret is needed just for this opt-in.
+2. Start the normal Code + S256 PKCE flow with `scope` including
+   `offline_access` and `prompt=consent`. authd requires explicit consent;
+   without it, offline access is removed. Inspect the actual token response:
+   requesting refresh does not guarantee receiving a `refresh_token`.
+3. Keep the refresh credential in protected backend storage, never in browser
+   JavaScript, URLs, logs, or the session cookie. Send a form-encoded request to
+   discovery's `token_endpoint` with `grant_type=refresh_token` and the latest
+   `refresh_token`, authenticating with the client's registered Basic or POST
+   method. Omit `scope` to retain the grant; an explicit scope may only narrow it.
+4. Validate the new access token's signature, issuer, audience/client binding,
+   subject, expiry, and actual scope. Replace the session's grants and grant
+   expiry; never extend old grants merely because a refresh request succeeded.
+   authd rechecks user/client state, session revocation, and current permissions.
+   If the refreshed scope set includes a permission the user or client no
+   longer holds, authd rejects it with `invalid_grant`; it does not silently
+   shrink that set. A fresh dynamic-client login can obtain a narrower grant.
+   Do not use refresh as recent authentication or step-up.
+5. Serialize refresh for each local session across tabs, requests **and app
+   processes**. Atomically persist the replacement refresh token with the new
+   grants. authd rotates on every successful refresh; reuse revokes the family.
+   A lost response or ambiguous storage commit can require a new sign-in. Do
+   not blindly retry the old token.
+6. On `invalid_grant`, revoked access, or invalid token validation, discard the
+   local refresh credential and require a new sign-in. During provider outages,
+   never serve requests using expired grants. Logout should remove the local
+   credential and attempt revocation through the discovered revocation endpoint.
+   Refresh idle/absolute limits and explicit provider-session revocation still
+   apply. Natural expiry of authd's browser session does not itself revoke a
+   previously consented offline grant.
+
+These are standard [OAuth refresh requests](https://www.rfc-editor.org/rfc/rfc6749#section-6)
+and [OIDC offline access](https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess).
+The paired registration opt-in, explicit-consent requirement, JWT scope contract,
+and rotation policy are authd's documented provider behavior; no custom refresh
+grant or `authd_*` field is required. Providers may differ, so check responses.
 
 ## 6. Minimal end-to-end check
 
@@ -200,9 +250,14 @@ the initial registration. Send `GET` to that URI with the management token as
 `Authorization: Bearer ...` to inspect the current client. To replace its
 allowed application scopes, send `PUT` to the **same URI** with the token and
 the full supported client metadata: unchanged `client_id`, `client_name`,
-`redirect_uris`, `grant_types`, `response_types`, and
+`redirect_uris`, `response_types`, and
 `token_endpoint_auth_method`, plus the new complete `scope` string. Include
 the original `client_secret` so authd can verify it without storing plaintext.
+Supply `grant_types` too: retain `authorization_code` and add or remove
+`refresh_token` together with `offline_access` in `scope` to opt in or out.
+Other identity scopes remain unchanged. Opting out revokes existing refresh
+families; opting back in requires a fresh consented login. Updates reject a
+concurrent policy change rather than overwriting it; re-read metadata and retry.
 The existing client ID and secret remain valid. Roles and group memberships
 are not auto-granted or changed by a scope update; newly created permissions
 must be assigned separately. A changed scope list takes effect on a fresh
@@ -217,7 +272,7 @@ authd registration-management-token CLIENT_ID networkmap.
 
 Run this with authd's runtime database configuration and `AUTHD_ISSUER`. It
 prints the management URI and token once. Reissuing rotates and invalidates
-the previous management token. The current management endpoint supports only
-scope-list replacement; role/group templates may be submitted during initial
+the previous management token. The current management endpoint supports
+application-scope replacement and refresh opt-in/out; role/group templates may be submitted during initial
 registration but cannot yet be edited through this endpoint. That is a
 deliberate authd limitation, not a general OIDC feature.

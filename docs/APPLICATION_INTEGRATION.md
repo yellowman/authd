@@ -43,7 +43,7 @@ a permission nor registering a client gives anyone access by itself.
    client secret separately in protected application configuration. The client
    secret is not the person's password. An optional registration-management
    credential is different again; it updates the existing client's allowed
-   scope list, not user assignments.
+   scope list and refresh opt-in, not user assignments.
 
 For example, `inventory.viewer` could contain `inventory.records.read`, while
 `inventory.editor` could contain read and write. A group named
@@ -73,14 +73,36 @@ Application-local memberships and ownership checks still apply after a scope
 check. An enabled, zero-role user can sign in to an identity-only client, so
 the application must define its own admission rule.
 
+## Keep grants current without reloading the application
+
+Refresh is optional and off by default. Dynamic clients opt in with standard
+`grant_types: ["authorization_code", "refresh_token"]` and `offline_access`
+in `scope`; request `prompt=consent` during login. This is OAuth/OIDC behavior,
+not the authd-specific role/group-template extension. Older authd versions
+reject the opt-in, and other providers may grant less than requested: inspect
+the returned registration metadata and token response.
+
+Without refresh, end the application's session when its access token expires.
+With refresh, keep a separately bounded local session, but allow operations
+only while its access-token grants remain current. Refresh on the backend,
+validate the new token against the same issuer, client and subject, and replace
+the granted permissions. Serialize rotation across requests and processes;
+store each replacement token atomically with the grants in protected storage.
+Never place refresh tokens in the browser or extend expired grants during an
+outage. Revocation, reuse, and lost/ambiguous refresh responses can require a
+new sign-in. See [the complete refresh contract](APP_CREATOR_OIDC.md#optional-server-side-refresh).
+
 ## Qualify the actual application
 
 Test a fresh login from the application through its real callback, not just
 authd's login page. Check a permitted user, a restricted user, a denied write,
 and a user with no app permission. Confirm the application sees only granted
 scopes and enforces local record rules. Re-test after changing a role or group:
-already-issued tokens and application sessions are snapshots until they expire
-or the application creates a new session. Record the app revision, client
+already-issued grants are snapshots until the access token expires or is
+replaced. For refresh-enabled clients, test concurrent requests, rotation,
+permission removal, user/session revocation, provider outage, local session
+limits, and logout. Confirm long-lived streams also stop using expired or
+revoked grants. Record the app revision, client
 registration, callback, token behavior, and negative-access results. A provider
 unit test or one successful login alone does not qualify all authorization
 paths.
