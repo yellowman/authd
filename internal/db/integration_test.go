@@ -191,15 +191,15 @@ func TestPostgresGroupRolesAndDynamicRegistration(t *testing.T) {
 	if prefix != "bdcmaps." || managed.ClientID != client.ClientID || managed.TokenEndpointAuthMethod != "client_secret_post" {
 		t.Fatal("management credential did not bind to client and namespace")
 	}
-	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), []string{"bdcmaps.site.read", "bdcmaps.site.write", "otherapp.admin"}, auditFixture)
+	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), oidc.ManagedClientUpdate{Scopes: []string{"bdcmaps.site.read", "bdcmaps.site.write", "otherapp.admin"}, ExpectedUpdatedAt: managed.UpdatedAt}, auditFixture)
 	if err == nil {
 		t.Fatal("cross-namespace scope update succeeded")
 	}
-	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(token(t)), []string{"bdcmaps.site.read"}, auditFixture)
+	_, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(token(t)), oidc.ManagedClientUpdate{Scopes: []string{"bdcmaps.site.read"}, ExpectedUpdatedAt: managed.UpdatedAt}, auditFixture)
 	if !errors.Is(err, oidc.ErrInvalidClient) {
 		t.Fatalf("wrong login secret accepted: %v", err)
 	}
-	managed, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), []string{"bdcmaps.site.read", "bdcmaps.site.write", "bdcmaps.coverage.run"}, auditFixture)
+	managed, err = oidcStore.UpdateManagedClientScopes(ctx, client.ClientID, identity.Hash(managementToken), identity.Hash(loginSecret), oidc.ManagedClientUpdate{Scopes: []string{"bdcmaps.site.read", "bdcmaps.site.write", "bdcmaps.coverage.run"}, ExpectedUpdatedAt: managed.UpdatedAt}, auditFixture)
 	require(t, err)
 	if len(managed.Permissions) != 3 {
 		t.Fatal("scope update did not publish new client permission")

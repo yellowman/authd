@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func (f *registrationFixture) RegisterDynamicClient(_ context.Context, _ []byte,
 	f.scopes = append([]string(nil), scopes...)
 	f.roles = append([]RoleTemplate(nil), roles...)
 	f.groups = append([]GroupTemplate(nil), groups...)
-	return Client{ClientID: edit.ClientID, Name: edit.Name, RedirectURIs: edit.RedirectURIs, TokenEndpointAuthMethod: edit.TokenEndpointAuthMethod}, nil
+	return Client{ClientID: edit.ClientID, Name: edit.Name, RedirectURIs: edit.RedirectURIs, TokenEndpointAuthMethod: edit.TokenEndpointAuthMethod, RefreshTokensEnabled: edit.RefreshTokensEnabled, IdentityScopes: edit.IdentityScopes}, nil
 }
 
 func TestProtectedRegistrationMetadata(t *testing.T) {
@@ -110,9 +111,15 @@ func (f *managedRegistrationFixture) ManagedClient(_ context.Context, clientID s
 	}
 	return f.client, "networkmap.", nil
 }
-func (f *managedRegistrationFixture) UpdateManagedClientScopes(_ context.Context, _ string, _, _ []byte, scopes []string, _ identity.Audit) (Client, error) {
-	f.updated = append([]string(nil), scopes...)
+func (f *managedRegistrationFixture) UpdateManagedClientScopes(_ context.Context, _ string, _, _ []byte, update ManagedClientUpdate, _ identity.Audit) (Client, error) {
+	f.updated = append([]string(nil), update.Scopes...)
 	f.client.Permissions = f.updated
+	f.client.RefreshTokensEnabled = update.RefreshTokensEnabled
+	f.client.IdentityScopes = withoutOfflineAccess(f.client.IdentityScopes)
+	if update.RefreshTokensEnabled {
+		f.client.IdentityScopes = append(f.client.IdentityScopes, "offline_access")
+		slices.Sort(f.client.IdentityScopes)
+	}
 	return f.client, nil
 }
 func TestManagedRegistrationScopeReplacement(t *testing.T) {

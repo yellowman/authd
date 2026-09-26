@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ func IssueInitialRegistrationToken(ctx context.Context, pool *sql.DB, hash []byt
 }
 
 func (s *OIDCStore) RegisterDynamicClient(ctx context.Context, tokenHash []byte, edit oidc.ClientEdit, secretHash, managementHash []byte, scopes []string, roles []oidc.RoleTemplate, groups []oidc.GroupTemplate, a identity.Audit) (out oidc.Client, err error) {
+	if edit.RefreshTokensEnabled != slices.Contains(edit.IdentityScopes, "offline_access") {
+		return out, identity.Invalid("refresh tokens require offline_access and vice versa")
+	}
 	if edit.TokenEndpointAuthMethod == "" {
 		edit.TokenEndpointAuthMethod = "client_secret_basic"
 	}
@@ -55,7 +59,7 @@ func (s *OIDCStore) RegisterDynamicClient(ctx context.Context, tokenHash []byte,
 			return identity.Invalid("invalid registration credentials")
 		}
 		if err := tx.QueryRowContext(ctx, `INSERT INTO clients(client_id,name,client_type,client_secret_hash,enabled,require_mfa,refresh_tokens_enabled,dynamic_registration,access_token_ttl_seconds,token_endpoint_auth_method)
- VALUES($1,$2,'confidential',$3,true,false,false,true,$4,$5) RETURNING id::text`, edit.ClientID, edit.Name, secretHash, int64(edit.AccessTokenTTL.Seconds()), edit.TokenEndpointAuthMethod).Scan(&edit.ID); err != nil {
+ VALUES($1,$2,'confidential',$3,true,false,$6,true,$4,$5) RETURNING id::text`, edit.ClientID, edit.Name, secretHash, int64(edit.AccessTokenTTL.Seconds()), edit.TokenEndpointAuthMethod, edit.RefreshTokensEnabled).Scan(&edit.ID); err != nil {
 			return err
 		}
 		if err := replaceClientSets(ctx, tx, edit.ID, edit); err != nil {
@@ -179,15 +183,16 @@ WHERE c.client_id=$1 AND c.dynamic_registration AND c.enabled AND m.token_hash=$
 	return client, prefix, err
 }
 
-func (s *OIDCStore) UpdateManagedClientScopes(ctx context.Context, clientID string, tokenHash, secretHash []byte, scopes []string, a identity.Audit) (out oidc.Client, err error) {
+func (s *OIDCStore) UpdateManagedClientScopes(ctx context.Context, clientID string, tokenHash, secretHash []byte, update oidc.ManagedClientUpdate, a identity.Audit) (out oidc.Client, err error) {
 	if len(tokenHash) != 32 || len(secretHash) != 32 {
 		return out, oidc.ErrInvalidClient
 	}
 	err = (&IdentityStore{DB: s.DB}).write(ctx, func(tx *sql.Tx) error {
 		var id, prefix string
 		var savedSecret []byte
-		e := tx.QueryRowContext(ctx, `SELECT c.id::text,m.scope_prefix,c.client_secret_hash FROM clients c
-JOIN client_registration_credentials m ON m.client_id=c.id WHERE c.client_id=$1 AND c.dynamic_registration AND c.enabled AND m.token_hash=$2 FOR UPDATE OF c,m`, clientID, tokenHash).Scan(&id, &prefix, &savedSecret)
+		var updatedAt time.Time
+		e := tx.QueryRowContext(ctx, `SELECT c.id::text,m.scope_prefix,c.client_secret_hash,c.updated_at FROM clients c
+JOIN client_registration_credentials m ON m.client_id=c.id WHERE c.client_id=$1 AND c.dynamic_registration AND c.enabled AND m.token_hash=$2 FOR UPDATE OF c,m`, clientID, tokenHash).Scan(&id, &prefix, &savedSecret, &updatedAt)
 		if errors.Is(e, sql.ErrNoRows) {
 			return oidc.ErrInvalidClient
 		}
@@ -197,6 +202,10 @@ JOIN client_registration_credentials m ON m.client_id=c.id WHERE c.client_id=$1 
 		if !hmac.Equal(savedSecret, secretHash) {
 			return oidc.ErrInvalidClient
 		}
+		if update.ExpectedUpdatedAt.IsZero() || !updatedAt.Equal(update.ExpectedUpdatedAt) {
+			return identity.ErrConflict
+		}
+		scopes := update.Scopes
 		if len(scopes) == 0 || len(scopes) > 64 {
 			return identity.Invalid("invalid application scope count")
 		}
@@ -216,7 +225,20 @@ JOIN client_registration_credentials m ON m.client_id=c.id WHERE c.client_id=$1 
 				return e
 			}
 		}
-		if _, e = tx.ExecContext(ctx, `UPDATE clients SET updated_at=clock_timestamp() WHERE id=$1::uuid`, id); e != nil {
+		if update.RefreshTokensEnabled {
+			_, e = tx.ExecContext(ctx, `INSERT INTO client_identity_scopes(client_id,scope) VALUES($1::uuid,'offline_access') ON CONFLICT DO NOTHING`, id)
+		} else {
+			_, e = tx.ExecContext(ctx, `DELETE FROM client_identity_scopes WHERE client_id=$1::uuid AND scope='offline_access'`, id)
+		}
+		if e != nil {
+			return e
+		}
+		if !update.RefreshTokensEnabled {
+			if _, e = tx.ExecContext(ctx, `UPDATE refresh_token_families SET revoked_at=clock_timestamp(),revoke_reason='client_policy_changed' WHERE client_id=$1::uuid AND revoked_at IS NULL`, id); e != nil {
+				return e
+			}
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE clients SET refresh_tokens_enabled=$2,updated_at=clock_timestamp() WHERE id=$1::uuid`, id, update.RefreshTokensEnabled); e != nil {
 			return e
 		}
 		if e = audit(ctx, tx, "client.registration_scopes_updated", "", "client", id, a); e != nil {

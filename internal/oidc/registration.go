@@ -70,7 +70,41 @@ type dynamicRegistrar interface {
 
 type managedRegistrar interface {
 	ManagedClient(context.Context, string, []byte) (Client, string, error)
-	UpdateManagedClientScopes(context.Context, string, []byte, []byte, []string, identity.Audit) (Client, error)
+	UpdateManagedClientScopes(context.Context, string, []byte, []byte, ManagedClientUpdate, identity.Audit) (Client, error)
+}
+
+// ManagedClientUpdate is checked against the client's version under its row
+// lock so a concurrent administrative policy change cannot be overwritten.
+type ManagedClientUpdate struct {
+	Scopes               []string
+	RefreshTokensEnabled bool
+	ExpectedUpdatedAt    time.Time
+}
+
+func registrationGrants(grants []string) (bool, error) {
+	seen := map[string]bool{}
+	for _, grant := range grants {
+		if seen[grant] || (grant != "authorization_code" && grant != "refresh_token") {
+			return false, identity.Invalid("only authorization_code and optional refresh_token are supported")
+		}
+		seen[grant] = true
+	}
+	if !seen["authorization_code"] {
+		return false, identity.Invalid("authorization_code is required")
+	}
+	return seen["refresh_token"], nil
+}
+
+func clientGrantTypes(c Client) []string {
+	grants := []string{"authorization_code"}
+	if c.RefreshTokensEnabled {
+		grants = append(grants, "refresh_token")
+	}
+	return grants
+}
+
+func withoutOfflineAccess(scopes []string) []string {
+	return slices.DeleteFunc(slices.Clone(scopes), func(scope string) bool { return scope == "offline_access" })
 }
 
 func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req RegistrationRequest, a identity.Audit) (RegistrationResponse, error) {
@@ -87,8 +121,12 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if len(req.ResponseTypes) == 0 {
 		req.ResponseTypes = []string{"code"}
 	}
-	if len(req.GrantTypes) != 1 || req.GrantTypes[0] != "authorization_code" || len(req.ResponseTypes) != 1 || req.ResponseTypes[0] != "code" {
-		return RegistrationResponse{}, identity.Invalid("only authorization_code with code response is supported")
+	refresh, err := registrationGrants(req.GrantTypes)
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
+	if len(req.ResponseTypes) != 1 || req.ResponseTypes[0] != "code" {
+		return RegistrationResponse{}, identity.Invalid("only the code response is supported")
 	}
 	if req.TokenEndpointAuthMethod == "" {
 		req.TokenEndpointAuthMethod = "client_secret_basic"
@@ -100,12 +138,12 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if err != nil || !contains(scopes, "openid") {
 		return RegistrationResponse{}, identity.Invalid("scope must include openid and valid space-separated scope tokens")
 	}
+	if refresh != contains(scopes, "offline_access") {
+		return RegistrationResponse{}, identity.Invalid("refresh_token and offline_access must be requested together")
+	}
 	appScopes := make([]string, 0, len(scopes))
 	identityScopeList := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope == "offline_access" {
-			return RegistrationResponse{}, identity.Invalid("offline_access is not supported for dynamically registered clients")
-		}
 		if identityScopes[scope] {
 			identityScopeList = append(identityScopeList, scope)
 		} else if len(scope) <= 128 && applicationScope.MatchString(scope) && scope != "system.admin" {
@@ -132,7 +170,7 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
-	edit, err := validateClientEdit(ClientEdit{ClientID: "dcr-" + clientID, Name: req.ClientName, Type: "confidential", Enabled: true, TokenEndpointAuthMethod: req.TokenEndpointAuthMethod, AccessTokenTTL: 5 * time.Minute, RedirectURIs: req.RedirectURIs, IdentityScopes: identityScopeList})
+	edit, err := validateClientEdit(ClientEdit{ClientID: "dcr-" + clientID, Name: req.ClientName, Type: "confidential", Enabled: true, RefreshTokensEnabled: refresh, TokenEndpointAuthMethod: req.TokenEndpointAuthMethod, AccessTokenTTL: 5 * time.Minute, RedirectURIs: req.RedirectURIs, IdentityScopes: identityScopeList})
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
@@ -141,7 +179,7 @@ func (s *Service) RegisterDynamicClient(ctx context.Context, token string, req R
 		return RegistrationResponse{}, err
 	}
 	return RegistrationResponse{ClientID: client.ClientID, ClientSecret: secret, ClientIDIssuedAt: time.Now().Unix(), ClientSecretExpiresAt: 0,
-		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
+		ClientName: client.Name, RedirectURIs: client.RedirectURIs, GrantTypes: clientGrantTypes(client), ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "), TokenEndpointAuthMethod: client.TokenEndpointAuthMethod,
 		RegistrationAccessToken: managementToken, RegistrationClientURI: s.registrationURI(client.ClientID), AuthdRoleTemplates: req.AuthdRoleTemplates, AuthdGroupTemplates: req.AuthdGroupTemplates}, nil
 }
 
@@ -190,7 +228,7 @@ func managedResponse(s *Service, c Client) RegistrationResponse {
 	scopes := append(append([]string(nil), c.IdentityScopes...), c.Permissions...)
 	slices.Sort(scopes)
 	return RegistrationResponse{ClientID: c.ClientID, ClientName: c.Name, RedirectURIs: c.RedirectURIs,
-		GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "),
+		GrantTypes: clientGrantTypes(c), ResponseTypes: []string{"code"}, Scope: strings.Join(scopes, " "),
 		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod, RegistrationClientURI: s.registrationURI(c.ClientID)}
 }
 
@@ -224,23 +262,27 @@ func (s *Service) UpdateManagedRegistration(ctx context.Context, clientID, token
 		return RegistrationResponse{}, err
 	}
 	if req.ClientID != clientID || req.ClientName != c.Name || !slices.Equal(req.RedirectURIs, c.RedirectURIs) ||
-		!slices.Equal(req.GrantTypes, []string{"authorization_code"}) || !slices.Equal(req.ResponseTypes, []string{"code"}) ||
+		!slices.Equal(req.ResponseTypes, []string{"code"}) ||
 		(req.TokenEndpointAuthMethod != "client_secret_basic" && req.TokenEndpointAuthMethod != "client_secret_post") ||
 		(c.TokenEndpointAuthMethod != "" && req.TokenEndpointAuthMethod != c.TokenEndpointAuthMethod) ||
 		!cryptoutil.ValidToken(req.ClientSecret) {
 		return RegistrationResponse{}, identity.Invalid("registration metadata or client secret is invalid")
 	}
+	refresh, err := registrationGrants(req.GrantTypes)
+	if err != nil {
+		return RegistrationResponse{}, err
+	}
 	scopes, err := parseScopes(req.Scope)
 	if err != nil || !contains(scopes, "openid") {
 		return RegistrationResponse{}, identity.Invalid("invalid registration scope")
+	}
+	if refresh != contains(scopes, "offline_access") {
+		return RegistrationResponse{}, identity.Invalid("refresh_token and offline_access must be requested together")
 	}
 	appScopes := make([]string, 0, len(scopes))
 	ident := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		if identityScopes[scope] {
-			if scope == "offline_access" {
-				return RegistrationResponse{}, identity.Invalid("offline_access is not supported")
-			}
 			ident = append(ident, scope)
 		} else if len(scope) <= 128 && applicationScope.MatchString(scope) && strings.HasPrefix(scope, prefix) && scope != prefix {
 			appScopes = append(appScopes, scope)
@@ -248,10 +290,10 @@ func (s *Service) UpdateManagedRegistration(ctx context.Context, clientID, token
 			return RegistrationResponse{}, identity.Invalid("scope is outside registration namespace")
 		}
 	}
-	if len(appScopes) == 0 || !slices.Equal(ident, c.IdentityScopes) {
+	if len(appScopes) == 0 || !slices.Equal(withoutOfflineAccess(ident), withoutOfflineAccess(c.IdentityScopes)) {
 		return RegistrationResponse{}, identity.Invalid("identity scopes or application scopes are invalid")
 	}
-	c, err = store.UpdateManagedClientScopes(ctx, clientID, identity.Hash(token), identity.Hash(req.ClientSecret), appScopes, a)
+	c, err = store.UpdateManagedClientScopes(ctx, clientID, identity.Hash(token), identity.Hash(req.ClientSecret), ManagedClientUpdate{Scopes: appScopes, RefreshTokensEnabled: refresh, ExpectedUpdatedAt: c.UpdatedAt}, a)
 	if err != nil {
 		return RegistrationResponse{}, err
 	}
