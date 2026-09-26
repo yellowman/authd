@@ -1,1 +1,25 @@
-{{define "mfa.html"}}<!doctype html><html lang="en"><head>{{template "head" .}}</head><body><main class="simple-page"><div class="eyebrow">AUTHD / MULTI-FACTOR AUTHENTICATION</div><h1>{{.Title}}</h1>{{if .RecoveryCodes}}<p class="message" role="status">{{if .Notice}}{{.Notice}}{{else}}Authenticator enabled. Save these recovery codes now; they are shown only in this response. Each code works once. All provider sessions have been signed out.{{end}}</p><div class="recovery-grid">{{range .RecoveryCodes}}<code>{{.}}</code>{{end}}</div>{{if .Session.ID}}<p><a href="/account">Return to account</a></p>{{else}}<p><a href="/login">Sign in with your authenticator</a></p>{{end}}{{else}}<p>In your authenticator app, add a new time-based account using manual key entry. Name it for this authd server, enter the setup key below, and use SHA-1, 6 digits, 30 seconds if prompted. This screen provides a manual key and provisioning URI, not a QR code.</p><p class="field-help">Enter the current six-digit code below to finish enrollment. This setup expires in 10 minutes and is bound to this session. Keep the key private. After confirmation, save the one-use recovery codes; all authd sessions are signed out and your next login needs a code.</p><div class="secret-display"><code>{{.Secret}}</code></div><details><summary>Authenticator provisioning URI</summary><code class="break-all">{{.URI}}</code></details><form method="post" action="/account/mfa/confirm" class="form-body">{{template "csrf" .}}<label>Six-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus></label><div><button class="button button-primary">Confirm authenticator</button> <a href="/account">Cancel</a></div></form>{{end}}</main></body></html>{{end}}
+{{define "mfa.html"}}<!doctype html>
+<html lang="en">
+<head>{{template "head" .}}</head>
+<body><main class="simple-page">
+  <div class="eyebrow">AUTHD / MULTI-FACTOR AUTHENTICATION</div>
+  <h1>{{.Title}}</h1>
+  {{if .RecoveryCodes}}
+    <p class="message" role="status">{{if .Notice}}{{.Notice}}{{else}}Authenticator enabled. Save these recovery codes now; they are shown only in this response. Each code works once. All provider sessions have been signed out.{{end}}</p>
+    <div class="recovery-grid">{{range .RecoveryCodes}}<code>{{.}}</code>{{end}}</div>
+    {{if .Session.ID}}<p><a href="/account">Return to account</a></p>{{else}}<p><a href="/login">Sign in with your authenticator</a></p>{{end}}
+  {{else}}
+    {{if .QRBase64}}<p>Scan this QR code with your authenticator app, or enter the setup key manually.</p>{{else}}<p>Add a new time-based account in your authenticator app using the setup key below.</p>{{end}}
+    <p>Use SHA-1, 6 digits, and a 30-second period if prompted.</p>
+    <p class="field-help">Enter the current six-digit code below to finish enrollment. This setup expires in 10 minutes and is bound to this session. Keep the key private. After confirmation, save the one-use recovery codes; all authd sessions are signed out and your next login needs a code.</p>
+    {{if .QRBase64}}<div class="totp-qr"><img src="data:image/png;base64,{{.QRBase64}}" width="256" height="256" alt="Authenticator setup QR code"></div>{{end}}
+    <p class="muted small">Manual setup key</p>
+    <div class="secret-display"><code>{{.Secret}}</code></div>
+    <details><summary>Authenticator provisioning URI</summary><code class="break-all">{{.URI}}</code></details>
+    <form method="post" action="/account/mfa/confirm" class="form-body">
+      {{template "csrf" .}}
+      <label>Six-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus></label>
+      <div><button class="button button-primary">Confirm authenticator</button> <a href="/account">Cancel</a></div>
+    </form>
+  {{end}}
+</main></body></html>{{end}}

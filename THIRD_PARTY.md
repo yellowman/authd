@@ -13,7 +13,7 @@ dependency for Unicode reference-label folding, not a frontend framework or an
 additional service. Vendoring the parser keeps the documentation available in
 the same binary without a CDN, package download, or Markdown build step. Its large
 entity/emoji lookup tables are upstream data, not additional authd features.
-The dependency module graph and existing dependency versions are unchanged.
+Vendoring the parser did not itself add a module dependency.
 
 Only compiled, release-owned documentation is parsed. This is **not** a Markdown
 upload or arbitrary-file rendering endpoint. `internal/docsite` renders the
@@ -26,3 +26,18 @@ The inventory in `internal/thirdparty/markdown/SHA256SUMS` records the source
 snapshot. Update it deliberately when updating the parser; do not patch the
 vendored grammar to add product behavior. Renderer safety and documentation
 coverage are tested in `internal/docsite` and the root `manual` package.
+
+## Authenticator QR encoder
+
+The enrollment page uses `github.com/skip2/go-qrcode` at
+`v0.0.0-20200617195104-da1b6568686e` (MIT license; copy in
+`internal/thirdparty/licenses/go-qrcode-LICENSE`). The Go standard library has
+no QR encoder; implementing its matrix placement and error correction locally
+would be less reliable. This package replaces only QR symbol encoding, not
+TOTP generation, verification, encryption, or authorization.
+
+The latest published module snapshot is from 2020 and upstream maintenance is
+infrequent. The input is the bounded, server-generated provisioning URI, not
+arbitrary uploaded content. Encoding happens in-process; the PNG is embedded
+in the existing no-store enrollment response, with no external QR service or
+additional secret-bearing URL. Manual key entry remains available.

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/yellowman/authd/internal/identity"
 	"github.com/yellowman/authd/internal/oidc"
 )
@@ -199,6 +201,9 @@ func (s *Server) beginTOTP(w http.ResponseWriter, r *http.Request) {
 	d.CSRF = s.auth.CSRF(raw, "session")
 	d.Secret = secret
 	d.URI = uri
+	if png, err := qrcode.Encode(uri, qrcode.Medium, 256); err == nil {
+		d.QRBase64 = base64.StdEncoding.EncodeToString(png)
+	}
 	s.render(w, 200, "mfa.html", d)
 }
 func (s *Server) confirmTOTP(w http.ResponseWriter, r *http.Request) {

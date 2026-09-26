@@ -159,9 +159,9 @@ an application's error. The issuer + subject remains the identity key.
 ### Set up MFA
 
 Open **Account → Authenticator → Enroll authenticator**, enter the current
-password, and add the displayed **manual setup key** to an authenticator as a
-time-based account. The current screen shows a key and provisioning URI, not a
-QR code. Its settings are SHA-1, 6 digits, and a 30-second period. Enter the current
+password, then scan the displayed QR code with an authenticator app. If scanning
+is unavailable, enter the displayed manual setup key as a time-based account.
+Its settings are SHA-1, 6 digits, and a 30-second period. Enter the current
 six-digit code to confirm. Enrollment expires after 10 minutes.
 
 After confirmation, save the recovery codes immediately. Each works once; the

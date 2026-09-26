@@ -65,6 +65,7 @@ type pageData struct {
 	SelectedClient                                                                                                               *oidc.Client
 	SigningKeys                                                                                                                  []oidc.SigningKey
 	ClientSecret                                                                                                                 string
+	QRBase64                                                                                                                     string
 	RecoveryCodes                                                                                                                []string
 	DefaultAccessTokenTTL                                                                                                        int64
 }

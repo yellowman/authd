@@ -235,6 +235,8 @@ td .button { white-space:nowrap; }
 .account-heading p { margin:4px 0 0; }
 .secret-display { border:1px solid var(--line); background:var(--surface); padding:20px; margin:24px 0; overflow-wrap:anywhere; }
 .secret-display code { font-size:17px; }
+.totp-qr { display:inline-block; max-width:100%; padding:12px; margin:14px 0 6px; border:1px solid var(--line); background:#fff; }
+.totp-qr img { display:block; max-width:100%; height:auto; }
 .recovery-grid { display:grid; gap:10px; padding:20px; background:var(--surface); border:1px solid var(--line); margin:24px 0; }
 .break-all { overflow-wrap:anywhere; display:block; margin:16px 0; }
 summary { cursor:pointer; min-height:32px; padding:5px 0; }

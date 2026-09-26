@@ -3,7 +3,10 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"html"
+	"image/png"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/yellowman/authd/internal/config"
 	"github.com/yellowman/authd/internal/cryptoutil"
 	"github.com/yellowman/authd/internal/identity"
@@ -42,9 +46,14 @@ type testStore struct {
 	loginSession                              identity.Session
 	snapshot                                  identity.AdminData
 	groupEdit                                 identity.GroupEdit
+	pendingTOTP                               []byte
 }
 
 func (m *testStore) BootstrapOpen(context.Context) (bool, error) { return true, nil }
+func (m *testStore) BeginTOTP(_ context.Context, _ []byte, _ string, ciphertext []byte, _ identity.Audit) error {
+	m.pendingTOTP = append([]byte(nil), ciphertext...)
+	return nil
+}
 func (m *testStore) Session(_ context.Context, hash []byte, _ time.Duration) (identity.Session, error) {
 	if len(m.loginSession.TokenHash) > 0 && bytes.Equal(hash, m.loginSession.TokenHash) {
 		return m.loginSession, nil
@@ -172,6 +181,59 @@ func TestParseFormAcceptsGroupMembersButRejectsDuplicateScalar(t *testing.T) {
 	values["name"] = []string{"Operators", "Admins"}
 	if err := s.parseForm(httptest.NewRecorder(), request(s, m, http.MethodPost, "/admin/groups/save", values, true)); err == nil {
 		t.Fatal("duplicate scalar field accepted")
+	}
+}
+func TestTOTPEnrollmentDisplaysLocalQRCode(t *testing.T) {
+	s, handler, store := fixture(t, false)
+	form := url.Values{"current_password": {"correct password"}, "csrf_token": {s.auth.CSRF(store.raw, "session")}}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, request(s, store, http.MethodPost, "/account/mfa/begin", form, true))
+	if w.Code != http.StatusOK || len(store.pendingTOTP) == 0 {
+		t.Fatalf("enrollment failed: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self' data:") {
+		t.Fatal("enrollment response is not protected for inline QR display")
+	}
+	body := w.Body.String()
+	const imagePrefix = `src="data:image/png;base64,`
+	imageStart := strings.Index(body, imagePrefix)
+	if imageStart < 0 {
+		t.Fatal("missing inline enrollment QR code")
+	}
+	imageText := body[imageStart+len(imagePrefix):]
+	imageEnd := strings.IndexByte(imageText, '"')
+	if imageEnd < 0 {
+		t.Fatal("unterminated QR image source")
+	}
+	imageData, err := base64.StdEncoding.DecodeString(html.UnescapeString(imageText[:imageEnd]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := png.DecodeConfig(bytes.NewReader(imageData))
+	if err != nil || configuration.Width != 256 || configuration.Height != 256 {
+		t.Fatalf("invalid QR PNG: dimensions=%dx%d error=%v", configuration.Width, configuration.Height, err)
+	}
+	const uriPrefix = `<code class="break-all">`
+	uriStart := strings.Index(body, uriPrefix)
+	if uriStart < 0 {
+		t.Fatal("missing manual provisioning URI")
+	}
+	uriText := body[uriStart+len(uriPrefix):]
+	uriEnd := strings.Index(uriText, "</code>")
+	if uriEnd < 0 {
+		t.Fatal("unterminated provisioning URI")
+	}
+	uri := html.UnescapeString(uriText[:uriEnd])
+	parsed, err := url.Parse(uri)
+	if err != nil || parsed.Scheme != "otpauth" || parsed.Query().Get("secret") == "" {
+		t.Fatalf("invalid provisioning URI: %v", err)
+	}
+	if !strings.Contains(body, "<code>"+parsed.Query().Get("secret")+"</code>") {
+		t.Fatal("QR and manual key disagree")
+	}
+	expected, err := qrcode.Encode(uri, qrcode.Medium, 256)
+	if err != nil || !bytes.Equal(imageData, expected) {
+		t.Fatalf("QR does not encode the provisioning URI: %v", err)
 	}
 }
 func TestGroupSaveAcceptsMultipleMembers(t *testing.T) {
@@ -403,6 +465,9 @@ func TestAllAdminTemplatesRenderAndEscape(t *testing.T) {
 	s.render(w, 200, "mfa.html", d)
 	if w.Code != 200 {
 		t.Fatal("recovery template")
+	}
+	if strings.Contains(w.Body.String(), "data:image/png") {
+		t.Fatal("recovery-code page contains an enrollment QR")
 	}
 	clients := s.data("clients")
 	clients.View = "clients"
