@@ -20,6 +20,9 @@ func TestInteractionFormsPreserveBrowserOrigin(t *testing.T) {
 		if strings.Contains(w.Body.String(), "<img") {
 			t.Fatal("unsafe client markup")
 		}
+		if strings.Contains(w.Body.String(), "IDENTITY SERVICE") {
+			t.Fatal("obsolete brand eyebrow retained")
+		}
 	}
 }
 func TestScopeDescriptionsDoNotInventPermissions(t *testing.T) {

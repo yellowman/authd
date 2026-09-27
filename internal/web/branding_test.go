@@ -57,7 +57,7 @@ func TestLoginBrandingAndEscaping(t *testing.T) {
 		if !strings.Contains(html, "Example &lt;script&gt;") || strings.Contains(html, "Example <script>") || !strings.Contains(html, `src="/login/logo"`) {
 			t.Fatal("branding missing or unescaped")
 		}
-		if strings.Contains(html, "There is no public signup") || strings.Contains(html, "Administrators manage accounts after signing in.") {
+		if strings.Contains(html, "There is no public signup") || strings.Contains(html, "Administrators manage accounts after signing in.") || strings.Contains(html, "IDENTITY SERVICE") || strings.Contains(html, "One account. The applications you operate.") {
 			t.Fatal("extraneous login copy retained")
 		}
 	}
