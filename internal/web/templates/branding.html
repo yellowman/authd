@@ -1,0 +1,16 @@
+{{define "branding"}}
+<section class="data-section">
+ <div class="section-heading"><h2>Login appearance</h2></div>
+ <p class="field-help">Name and logo shown on the sign-in page. This does not change your issuer URL or application configuration.</p>
+ <form method="post" action="/admin/branding" enctype="multipart/form-data" class="form-body">
+  {{template "csrf" .}}<input type="hidden" name="expected_updated_at" value="{{version .Branding.UpdatedAt}}">
+  <div class="form-grid">
+   <label>Display name<input name="name" value="{{.Branding.Name}}" maxlength="100" required></label>
+   <label>Logo<input name="logo" type="file" accept="image/png,image/jpeg" aria-describedby="logo-help"><small id="logo-help" class="muted">PNG or JPEG, up to 256 KiB and 2048 × 2048 pixels. Leave empty to keep the current logo.</small></label>
+  </div>
+  {{if .Branding.Logo}}<img class="login-logo" src="/login/logo" alt="Current login logo"><label class="check"><input type="checkbox" name="remove_logo" value="true">Remove current logo</label>{{end}}
+  <p class="field-help">Changes take effect immediately. Use “authd” and remove the logo to restore the defaults.</p>
+  <div class="form-actions"><button class="button button-primary">Save appearance</button><a href="/login">View sign-in page</a></div>
+ </form>
+</section>
+{{end}}

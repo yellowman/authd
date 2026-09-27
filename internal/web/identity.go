@@ -46,6 +46,10 @@ func (s *Server) setupPost(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	d := s.data("Sign in")
+	if err := s.loadBranding(r, &d); err != nil {
+		s.failure(w, r, err)
+		return
+	}
 	var err error
 	d.CSRF, err = s.browserCSRF(w, r)
 	if err != nil {
@@ -54,7 +58,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	d.ReturnTo = safeReturn(r.URL.Query().Get("return_to"))
 	if raw := r.URL.Query().Get("oidc"); raw != "" {
-		if client, hint, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
+		if client, hint, requiresMFA, ok := s.oidc.PendingLogin(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
+			d.ClientRequiresMFA = requiresMFA
 			d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
 			d.ReturnTo = "/authorize"
 		}
@@ -76,10 +81,15 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, identity.ErrCredentials) {
 			d := s.data("Sign in")
+			if err := s.loadBranding(r, &d); err != nil {
+				s.failure(w, r, err)
+				return
+			}
 			d.CSRF = s.auth.CSRF(s.cookie(r, "browser"), "browser")
 			d.ReturnTo = safeReturn(r.PostForm.Get("return_to"))
 			if raw := r.PostForm.Get("oidc_request"); raw != "" {
-				if client, hint, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
+				if client, hint, requiresMFA, ok := s.oidc.PendingLogin(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
+					d.ClientRequiresMFA = requiresMFA
 					d.ClientName, d.LoginHint, d.OIDCRequest = client, hint, raw
 					d.ReturnTo = "/authorize"
 				}
@@ -133,6 +143,7 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := s.data("Your account")
+	d.View = "account"
 	d.Session = sess
 	d.Sessions = sessions
 	d.CSRF = s.auth.CSRF(raw, "session")

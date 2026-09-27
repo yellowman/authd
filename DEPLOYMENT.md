@@ -712,3 +712,11 @@ public HTTPS reverse proxy. See [browser tests](docs/BROWSER_TESTS.md).
 `make install-*` now installs `OPERATOR_GUIDE.md` alongside this guide. The default
 admin view is **Start here**; all prior `?view=users`/roles/clients links and form
 endpoints remain valid.
+## Login appearance migration
+
+This release adds migration `009_login_branding.sql`. Before starting the new
+binary, follow the existing stop/backup/new-binary `authd migrate`/runtime-grants/
+install/start upgrade procedure. Run migration with the deployment's migration
+credential, not the service's restricted runtime credential. No new environment
+variable or image directory is needed. The initial name remains `authd`, with no
+custom logo. Administrators configure it under **Login appearance**.

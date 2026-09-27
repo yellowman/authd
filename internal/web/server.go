@@ -48,6 +48,8 @@ var (
 
 type clientIPContextKey struct{}
 type pageData struct {
+	ClientRequiresMFA                                                                                                            bool
+	Branding                                                                                                                     identity.Branding
 	Document                                                                                                                     *docsite.Document
 	DocumentGroups                                                                                                               []docsite.Group
 	DocumentQuery                                                                                                                string
@@ -120,6 +122,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("GET /setup", s.setup)
 	mux.HandleFunc("POST /setup", s.setupPost)
 	mux.HandleFunc("GET /login", s.login)
+	mux.HandleFunc("GET /login/logo", s.loginLogo)
 	mux.HandleFunc("POST /login", s.loginPost)
 	mux.HandleFunc("POST /session/logout", s.logout)
 	mux.HandleFunc("GET /account", s.account)
@@ -132,6 +135,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /account/mfa/recovery", s.regenerateRecoveryCodes)
 	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/admin/", http.StatusSeeOther) })
 	mux.HandleFunc("GET /admin/{$}", s.admin)
+	mux.HandleFunc("GET /admin/branding", s.branding)
+	mux.HandleFunc("POST /admin/branding", s.saveBranding)
 	mux.HandleFunc("GET /admin/docs", s.documents)
 	mux.HandleFunc("GET /admin/docs/raw", s.documentSource)
 	mux.HandleFunc("POST /admin/users/create", s.createUser)
@@ -301,11 +306,18 @@ func (s *Server) parseForm(w http.ResponseWriter, r *http.Request) error {
 		return errFormOrigin
 	}
 	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || kind != "application/x-www-form-urlencoded" {
+	multipart := kind == "multipart/form-data" && r.URL.Path == "/admin/branding"
+	if err != nil || (kind != "application/x-www-form-urlencoded" && !multipart) {
 		return identity.Invalid("expected an HTML form")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
-	if err = r.ParseForm(); err != nil {
+	if multipart {
+		r.Body = http.MaxBytesReader(w, r.Body, 512<<10)
+		err = r.ParseMultipartForm(512 << 10)
+	} else {
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		err = r.ParseForm()
+	}
+	if err != nil {
 		return identity.Invalid("invalid or oversized form")
 	}
 	for name, values := range r.PostForm {

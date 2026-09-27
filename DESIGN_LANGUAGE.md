@@ -41,6 +41,19 @@ Use a narrow centered content column with a small product mark, one strong headi
 
 When an OIDC request is active, show the client name so the user knows what they are signing into.
 
+Login appearance is an administrator-editable name and local raster logo. Keep
+the logo within the existing 44px mark slot, preserve its aspect ratio, and let
+long names wrap without crowding the sign-in form. Editing uses a flat section,
+visible labels, one primary Save action, and an explicit saved notice. No remote
+image URLs, decorative banner, new color palette, or additional card grid.
+
+The account page shows the established icon rail only for users with
+`system.admin`; the account icon is its current destination. Non-admin accounts
+never render admin navigation. Users and Groups use different outline icons.
+Authenticator copy states whether two-step verification is currently enabled,
+and an application-specific requirement is named during that app's sign-in.
+Keep setup consequences beside confirmation, not as the account-page intro.
+
 ### Administration
 
 Desktop administration uses a slim left icon/text rail and one primary work surface.

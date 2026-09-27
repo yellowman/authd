@@ -11,7 +11,7 @@
   {{else}}
     {{if .QRBase64}}<p>Scan this QR code with your authenticator app, or enter the setup key manually.</p>{{else}}<p>Add a new time-based account in your authenticator app using the setup key below.</p>{{end}}
     <p>Use SHA-1, 6 digits, and a 30-second period if prompted.</p>
-    <p class="field-help">Enter the current six-digit code below to finish enrollment. This setup expires in 10 minutes and is bound to this session. Keep the key private. After confirmation, save the one-use recovery codes; all authd sessions are signed out and your next login needs a code.</p>
+    <p class="field-help">This setup expires in 10 minutes. Keep the setup key private.</p>
     {{if .QRBase64}}<div class="totp-qr"><img src="data:image/png;base64,{{.QRBase64}}" width="256" height="256" alt="Authenticator setup QR code"></div>{{end}}
     <p class="muted small">Manual setup key</p>
     <div class="secret-display"><code>{{.Secret}}</code></div>
@@ -19,7 +19,8 @@
     <form method="post" action="/account/mfa/confirm" class="form-body">
       {{template "csrf" .}}
       <label>Six-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus></label>
-      <div><button class="button button-primary">Confirm authenticator</button> <a href="/account">Cancel</a></div>
+      <p class="field-help">Enter a valid code to enable two-step verification. Confirming signs you out of all provider sessions. Your next sign-in will require a code; save the recovery codes shown next.</p>
+      <div><button class="button button-primary">Enable two-step verification</button> <a href="/account">Cancel</a></div>
     </form>
   {{end}}
 </main></body></html>{{end}}

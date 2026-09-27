@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <div class="eyebrow">AUTHD / IDENTITY ADMINISTRATION</div>
-        <h1>{{if eq .View "guide"}}Start here{{else if eq .View "docs"}}Documentation{{else if eq .View "users"}}Users{{else if eq .View "roles"}}Roles{{else if eq .View "groups"}}Groups{{else if eq .View "permissions"}}Permissions{{else if eq .View "clients"}}OIDC Clients{{else if eq .View "sessions"}}Sessions{{else if eq .View "keys"}}Signing Keys{{else}}Audit{{end}}</h1>
+        <h1>{{if eq .View "guide"}}Start here{{else if eq .View "docs"}}Documentation{{else if eq .View "branding"}}Login appearance{{else if eq .View "users"}}Users{{else if eq .View "roles"}}Roles{{else if eq .View "groups"}}Groups{{else if eq .View "permissions"}}Permissions{{else if eq .View "clients"}}OIDC Clients{{else if eq .View "sessions"}}Sessions{{else if eq .View "keys"}}Signing Keys{{else}}Audit{{end}}</h1>
       </div>
       <div class="topbar-meta"><code>{{.Issuer}}</code><a href="/account">{{.Session.User.Username}}</a></div>
     </header>
@@ -21,6 +21,8 @@
 
       {{if or (eq .View "guide") (eq .View "docs")}}
       {{template "documentation" .}}
+      {{else if eq .View "branding"}}
+      {{template "branding" .}}
       {{else if eq .View "users"}}
       {{template "view-help" .}}
       <section class="data-section">

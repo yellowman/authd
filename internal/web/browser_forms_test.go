@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/yellowman/authd/internal/identity"
 )
@@ -22,7 +23,23 @@ import (
 type browserIdentityStore struct {
 	*testStore
 	setupOpen  bool
+	brand      identity.Branding
 	bootstraps int
+}
+
+func (m *browserIdentityStore) Branding(context.Context) (identity.Branding, error) {
+	return m.brand, nil
+}
+func (m *browserIdentityStore) SaveBranding(_ context.Context, _ []byte, b identity.Branding, replace, remove bool, _ identity.Audit) error {
+	m.mutationCalls++
+	m.brand.Name = b.Name
+	if replace {
+		m.brand.Logo = b.Logo
+	}
+	if remove {
+		m.brand.Logo = nil
+	}
+	return nil
 }
 
 func (m *browserIdentityStore) BootstrapOpen(context.Context) (bool, error) { return m.setupOpen, nil }
@@ -36,7 +53,7 @@ func TestBrowserNativeWebForms(t *testing.T) { browserWebFixture(t, "web") }
 func TestBrowserOperatorLayout(t *testing.T) { browserWebFixture(t, "layout") }
 func browserWebFixture(t *testing.T, scenario string) {
 	s, _, m := fixture(t, true)
-	bs := &browserIdentityStore{testStore: m, setupOpen: true}
+	bs := &browserIdentityStore{testStore: m, setupOpen: true, brand: identity.Branding{Name: "Example Network", UpdatedAt: time.Now()}}
 	s.auth.Store = bs
 	var handler http.Handler
 	var mu sync.Mutex // shared fixture state, not a production serialization rule

@@ -253,3 +253,16 @@ same documentation. Client connection details show saved registration values. **
 `DESIGN_LANGUAGE.md` for the interface contract, and `VALIDATION.md` for what has
 actually been tested. Release history is in `CHANGELOG.md`; it is not the setup
 procedure.
+## 10. Login appearance
+
+In **Administration → Login appearance**, set the display name and optionally
+upload a PNG/JPEG logo. Images must be at most 256 KiB and 2048 × 2048 pixels;
+the server converts them to PNG and strips metadata. Leave the upload empty to
+keep the current logo, or select **Remove current logo**. Use `authd` as the name
+and remove the logo to restore defaults.
+
+Saving requires administrator access and a sign-in within the last ten minutes.
+Changes are audited and take effect on the next login-page request, without a
+restart. Concurrent edits are rejected rather than silently overwritten.
+The name and logo are public, stored in PostgreSQL, and included in database
+backups. They change presentation only—not issuer URLs, subjects, or app grants.

@@ -71,7 +71,7 @@ def run(manifest: dict[str, str]) -> None:
                 def assert_rail() -> None:
                     assert page.locator(".rail-nav a[aria-current='page']").count() == 1
                     links = page.locator(".rail a")
-                    assert links.count() == 11
+                    assert links.count() == page.locator('.rail-nav a').count() + 2
                     for i in range(links.count()):
                         link = links.nth(i)
                         assert link.locator("svg[aria-hidden='true'][focusable='false']").count() == 1
@@ -118,7 +118,7 @@ def run(manifest: dict[str, str]) -> None:
                                 assert page.evaluate("id => !!document.getElementById(id)", fragment), fragment
                         viewport_check(f"{label}-{width}", full_page=False)
                         pages += 1
-                    for label, path in (("client-connection", "/admin/?client=00000000-0000-4000-8000-000000000001"), ("account", "/account"), ("setup", "/setup"), ("login", "/login")):
+                    for label, path in (("branding", "/admin/branding"), ("client-connection", "/admin/?client=00000000-0000-4000-8000-000000000001"), ("account", "/account"), ("setup", "/setup"), ("login", "/login")):
                         page.set_content(source(path), wait_until="domcontentloaded")
                         page.add_style_tag(content=css)
                         viewport_check(f"{label}-{width}")
@@ -135,7 +135,7 @@ def run(manifest: dict[str, str]) -> None:
                         assert box and box["y"] >= 0 and box["y"] + box["height"] <= 360
                     viewport_check(f"short-rail-{width}", full_page=False)
                     pages += 1
-                records.append({"mode": "layout-only", "pages": pages, "svg_count_per_rail": 11, "shading": "none in default/selected/hover", "native_forms_exercised": False})
+                records.append({"mode": "layout-only", "pages": pages, "shading": "none in default/selected/hover", "native_forms_exercised": False})
             elif manifest["scenario"] == "web":
                 page.goto(origin + "/setup?test_private=must-not-leak")
                 page.locator('[name="bootstrap_token"]').fill("A" * 43)
@@ -159,6 +159,16 @@ def run(manifest: dict[str, str]) -> None:
                         if view == "guide":
                             assert page.get_by_role("heading", name="Adding an app to authd").count() == 1
                         viewport_check(f"{view}-{width}")
+                for width in (1440, 390):
+                    page.set_viewport_size({"width": width, "height": 1000 if width == 1440 else 844})
+                    page.goto(origin + "/admin/branding")
+                    page.locator('[name="name"]').fill("Example Network " + "A" * 75)
+                    submit("/admin/branding", 'form[action="/admin/branding"] button', 303)
+                    assert "Login appearance saved." in page.locator("body").inner_text()
+                    viewport_check(f"branding-{width}")
+                    page.goto(origin + "/login")
+                    assert page.locator("h1").inner_text().startswith("Example Network")
+                    viewport_check(f"branded-login-{width}")
                 page.set_viewport_size({"width": 1440, "height": 1000})
                 page.goto(origin + "/admin/?view=permissions&test_private=must-not-leak")
                 page.locator('form[action="/admin/permissions/create"] input[name="name"]').fill("example.reports.read")

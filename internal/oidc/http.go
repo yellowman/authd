@@ -172,14 +172,21 @@ func (h *HTTP) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTP) Pending(ctx context.Context, raw, browserRaw string) (clientName, loginHint string, ok bool) {
+	clientName, loginHint, _, ok = h.PendingLogin(ctx, raw, browserRaw)
+	return
+}
+
+// PendingLogin exposes only the browser-bound application's sign-in policy.
+// It does not reveal whether a supplied username has enrolled a factor.
+func (h *HTTP) PendingLogin(ctx context.Context, raw, browserRaw string) (clientName, loginHint string, requiresMFA, ok bool) {
 	if h == nil || h.service == nil || !cryptoutil.ValidToken(raw) || !cryptoutil.ValidToken(browserRaw) {
-		return "", "", false
+		return "", "", false, false
 	}
 	req, client, err := h.service.Store.AuthorizationRequest(ctx, identity.Hash(raw))
 	if err != nil || !time.Now().UTC().Before(req.ExpiresAt) || !hmac.Equal(req.BrowserHash, identity.Hash(browserRaw)) || !client.Enabled || !contains(client.RedirectURIs, req.RedirectURI) {
-		return "", "", false
+		return "", "", false, false
 	}
-	return client.Name, req.LoginHint, true
+	return client.Name, req.LoginHint, client.RequireMFA || req.RequiredACR == ACRMFA, true
 }
 
 func (h *HTTP) discovery(w http.ResponseWriter, _ *http.Request) {
