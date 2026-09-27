@@ -14,7 +14,7 @@ func TestInteractionFormsPreserveBrowserOrigin(t *testing.T) {
 		if w.Header().Get("Referrer-Policy") != "origin" {
 			t.Errorf("%s: bad referrer policy %q", action, w.Header().Get("Referrer-Policy"))
 		}
-		if !strings.Contains(w.Body.String(), "Share your assigned authd role names.") || !strings.Contains(w.Body.String(), "Application-defined permission") {
+		if action == "/authorize/consent" && (!strings.Contains(w.Body.String(), "Share your assigned authd role names.") || !strings.Contains(w.Body.String(), "Application permissions are limited by your roles.")) {
 			t.Error("missing scope explanation")
 		}
 		if strings.Contains(w.Body.String(), "<img") {

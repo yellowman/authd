@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"errors"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,11 +18,14 @@ type interactionView struct {
 	Claims                                                       []string
 	Fields                                                       map[string]string
 	Offline                                                      bool
+	PreviousApproval                                             ConsentApproval
+	Consent                                                      *consentComparison
 }
 
-var interactionTemplate = template.Must(template.New("interaction").Funcs(template.FuncMap{"scopeHelp": ScopeDescription}).Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}} · authd</title><link rel="stylesheet" href="/static/app.css"></head><body class="auth-page"><main class="auth-frame"><section class="auth-brand"><div class="mark" aria-hidden="true">A</div><div><h1>authd</h1></div></section><section class="auth-panel"><div class="section-rule"></div><h2>{{.Title}}</h2><p>{{.Description}}</p><p><strong>{{.ClientName}}</strong>{{if .Username}} · {{.Username}}{{end}}</p>{{if .Scopes}}<h3>Requested access</h3><ul>{{range .Scopes}}<li><code>{{.}}</code><span class="block muted">{{scopeHelp .}}</span></li>{{end}}</ul>{{end}}{{if .Claims}}<h3>Additional identity claims</h3><ul>{{range .Claims}}<li><code>{{.}}</code></li>{{end}}</ul>{{end}}{{if .Offline}}<p class="message">This application requests access while you are not signed in. Revoking the associated provider session also revokes its refresh grants.</p>{{end}}<form method="post" action="{{.Action}}" class="stack-lg"><input type="hidden" name="csrf_token" value="{{.CSRF}}">{{if .Flow}}<input type="hidden" name="flow" value="{{.Flow}}">{{end}}{{range $name,$value := .Fields}}<input type="hidden" name="{{$name}}" value="{{$value}}">{{end}}<button name="decision" value="allow" class="button button-primary">{{if eq .Action "/authorize/consent"}}Allow and continue{{else}}Sign out of authd{{end}}</button><button name="decision" value="deny" class="button">Cancel</button></form></section></main></body></html>`))
-
 func (h *HTTP) interaction(w http.ResponseWriter, r *http.Request, view interactionView) {
+	if view.Action == "/authorize/consent" {
+		view.Consent = compareConsent(view.Scopes, view.Claims, view.PreviousApproval)
+	}
 	var buf bytes.Buffer
 	if err := interactionTemplate.Execute(&buf, view); err != nil {
 		h.transient(w, r)
@@ -51,7 +53,12 @@ func (h *HTTP) renderConsent(w http.ResponseWriter, r *http.Request, flow, brows
 		h.transient(w, r)
 		return
 	}
-	h.interaction(w, r, interactionView{Title: "Authorize application", Description: "You are signed in to authd. Review what this application is asking to receive. Continuing sends a sign-in result, never your password. Cancel if you did not start this sign-in.", ClientName: client.Name, Username: session.User.Username, Action: "/authorize/consent", Flow: flow, CSRF: h.consentCSRF(flow, browser, raw), Scopes: req.Scopes, Claims: consentClaimNames(req.Claims), Offline: contains(req.Scopes, "offline_access")})
+	previous, err := h.service.Store.ConsentApproval(r.Context(), identity.Hash(raw), client.ID)
+	if err != nil {
+		h.transient(w, r)
+		return
+	}
+	h.interaction(w, r, interactionView{Title: "Authorize application", Description: "Review the access requested by this application.", ClientName: client.Name, Username: session.User.Username, Action: "/authorize/consent", Flow: flow, CSRF: h.consentCSRF(flow, browser, raw), Scopes: req.Scopes, Claims: consentClaimNames(req.Claims), Offline: contains(req.Scopes, "offline_access"), PreviousApproval: previous})
 }
 func (h *HTTP) consent(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {

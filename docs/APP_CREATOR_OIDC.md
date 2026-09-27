@@ -224,6 +224,13 @@ window is the remaining access-token lifetime, not the longer cookie lifetime.
    apply. Natural expiry of authd's browser session does not itself revoke a
    previously consented offline grant.
 
+authd's consent screen compares the request with that person's last explicit
+approval for the client: additions are prominent, prior access is collapsed,
+and omitted items are labeled as not requested rather than revoked. This is
+presentation history, not a permission grant or a bypass of `prompt=consent`.
+An upgrade starts with no recorded approvals. Standard clients need no new
+endpoint, parameter, or authd extension for this comparison.
+
 These are standard [OAuth refresh requests](https://www.rfc-editor.org/rfc/rfc6749#section-6)
 and [OIDC offline access](https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess).
 The paired registration opt-in, explicit-consent requirement, JWT scope contract,

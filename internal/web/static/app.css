@@ -172,6 +172,19 @@ h2 { margin-bottom: 4px; font-size: 16px; line-height: 1.3; letter-spacing: -0.0
 .auth-panel { padding-top: 18px; }
 .section-rule { height: 2px; background: var(--text); margin-bottom: 22px; }
 .auth-panel h2 { margin-top: 6px; font-size: 25px; }
+.consent-frame { width:min(1040px,calc(100% - 40px)); margin:0 auto; padding:40px 0; }
+.consent-frame .auth-brand { align-items:center; }
+.consent-frame .auth-brand h1 { font-size:24px; margin:0; }
+.consent-panel { margin-top:28px; }
+.consent-application { font-size:16px; }
+.consent-section { margin-top:24px; border-bottom:1px solid var(--line); }
+.consent-section .section-heading { padding:10px 14px; }
+.consent-history > summary { padding:10px 14px; font-weight:650; }
+.consent-history > summary .small { margin-left:12px; font-weight:400; }
+.consent-section > .field-help { margin:10px 14px; }
+.consent-scope-row > code:only-child { grid-column:1 / -1; }
+.consent-claims h4 { font-size:12px; font-weight:600; margin:14px; }
+.consent-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:24px; }
 .stack-lg { display: grid; gap: 18px; margin-top: 26px; }
 label { display: grid; gap: 7px; color: #3c424b; font-size: 12px; font-weight: 650; }
 input {
@@ -226,6 +239,7 @@ legend { padding:0 5px; font-size:12px; color:var(--muted); }
 .permission-branch[open] > summary { background:var(--surface-2); }
 .permission-children { margin-left:18px; border-left:1px solid var(--line); }
 .permission-leaf { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) auto; gap:12px; align-items:start; padding:9px 14px; border-bottom:1px solid var(--line); }
+.consent-scope-row { grid-template-columns:minmax(0,1fr) minmax(0,1.5fr); }
 .permission-leaf > a { white-space:nowrap; }
 .permission-option { padding:8px 14px; border-bottom:1px solid var(--line); }
 .permission-option > span { min-width:0; }
@@ -255,6 +269,7 @@ summary { cursor:pointer; min-height:32px; padding:5px 0; }
 .skip-link:focus { left:0; }
 @media(max-width:600px) { .form-grid { grid-template-columns:1fr; } .form-body { padding:14px; } .simple-page { padding-top:26px; } .section-heading { gap:10px; flex-wrap:wrap; } th,td { padding:9px 10px; } }
 @media(max-width:600px) { .permission-leaf { grid-template-columns:minmax(0,1fr) auto; } .permission-leaf .muted { grid-column:1 / -1; } .permission-leaf > a { grid-column:2; grid-row:1; } }
+@media(max-width:600px) { .consent-frame { width:calc(100% - 28px); padding:24px 0; } .consent-scope-row { grid-template-columns:minmax(0,1fr); gap:4px; } }
 
 /* Operator guidance is an ordinary section, not a dashboard or an overlay. */
 h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.45; }

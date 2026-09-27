@@ -206,8 +206,8 @@ separate 12-hour application cookie. This release does not implement back-channe
 logout that would remotely remove all application sessions.
 
 Refresh tokens let an application request new short-lived tokens without another
-interactive login. They are optional for manually created clients; dynamically
-registered clients do not currently receive them. Issuing them requires the client to allow
+interactive login. They are optional and off by default for both manually created
+and dynamically registered clients. Issuing them requires the client to allow
 refresh, allow/request `openid offline_access`, and complete `prompt=consent`.
 Applications must serialize refreshes because tokens rotate once per use; reuse
 revokes the family. Do not turn them on just because the checkbox exists.
@@ -215,6 +215,14 @@ revokes the family. Do not turn them on just because the checkbox exists.
 On the consent page, check the application name and requested access. **Allow and
 continue** releases the sign-in result, not your password. **Cancel** refuses that
 request. A basic application sign-in does not need offline access.
+
+**New access** lists additions to the last approval. **Previously approved** is
+collapsed; expand it to check access requested again. **Not requested this time**
+lists omitted items, not revoked tokens. An unchanged request says **No access
+changes**. The comparison includes scopes and explicitly requested identity
+fields. It records only a completed, explicitly approved request for this person
+and application; after upgrading, the first request has no recorded baseline.
+Saved approvals do not grant roles or skip a requested consent screen.
 
 Explicit authd sign-out/session revocation also revokes the linked offline grants.
 Natural session expiry and routine reauthentication are different from explicit

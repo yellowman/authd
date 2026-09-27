@@ -54,6 +54,16 @@ Authenticator copy states whether two-step verification is currently enabled,
 and an application-specific requirement is named during that app's sign-in.
 Keep setup consequences beside confirmation, not as the account-page intro.
 
+### Application consent
+
+Consent uses a wider work surface than sign-in. Show new access first, group
+dot-separated scopes with native disclosure rows, and collapse previously
+approved access. State clearly when nothing changed. Keep standard identity
+scope explanations, but explain application-defined permissions once instead
+of repeating the same sentence beside every scope. Label omitted access as
+**Not requested this time**, not revoked. Retain one primary Allow action,
+Cancel, and the native form's origin and CSRF protections.
+
 ### Administration
 
 Desktop administration uses a slim left icon/text rail and one primary work surface.
