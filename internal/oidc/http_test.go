@@ -48,10 +48,11 @@ type fakeOIDCStore struct {
 	active        string
 	sessions      map[string]identity.Session
 	familyRevoked map[string]bool
+	approvals     map[string]ConsentApproval
 }
 
 func newFakeOIDCStore(c Client) *fakeOIDCStore {
-	return &fakeOIDCStore{client: c, requests: map[string]AuthorizationRequest{}, codes: map[string]*fakeCode{}, refresh: map[string]*fakeRefresh{}, keys: map[string]SigningKey{}, sessions: map[string]identity.Session{}, familyRevoked: map[string]bool{}}
+	return &fakeOIDCStore{client: c, requests: map[string]AuthorizationRequest{}, codes: map[string]*fakeCode{}, refresh: map[string]*fakeRefresh{}, keys: map[string]SigningKey{}, sessions: map[string]identity.Session{}, familyRevoked: map[string]bool{}, approvals: map[string]ConsentApproval{}}
 }
 func hashKey(v []byte) string { return base64.RawURLEncoding.EncodeToString(v) }
 func (f *fakeOIDCStore) Client(_ context.Context, id string) (Client, error) {
@@ -77,6 +78,18 @@ func (f *fakeOIDCStore) AuthorizationRequest(_ context.Context, h []byte) (Autho
 		return r, Client{}, ErrInvalidRequest
 	}
 	return r, f.client, nil
+}
+func (f *fakeOIDCStore) ConsentApproval(_ context.Context, hash []byte, clientID string) (ConsentApproval, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	session, ok := f.sessions[hashKey(hash)]
+	if !ok {
+		return ConsentApproval{}, ErrLoginRequired
+	}
+	if clientID != f.client.ID || !f.client.Enabled {
+		return ConsentApproval{}, ErrInvalidClient
+	}
+	return f.approvals[session.User.ID+"\x00"+clientID], nil
 }
 func (f *fakeOIDCStore) ConsentAuthorizationRequest(_ context.Context, rh, bh, sh []byte, allow bool, _ identity.Audit) error {
 	f.mu.Lock()
@@ -120,6 +133,9 @@ func (f *fakeOIDCStore) IssueAuthorizationCode(_ context.Context, rh, bh, sh, ch
 	}
 	g := CodeGrant{Claims: r.Claims, Client: f.client, Subject: subject, RedirectURI: r.RedirectURI, Scopes: r.Scopes, Nonce: r.Nonce}
 	f.codes[hashKey(ch)] = &fakeCode{grant: g, challenge: r.CodeChallenge, expires: exp}
+	if r.ConsentSessionID == sess.ID {
+		f.approvals[sess.User.ID+"\x00"+f.client.ID] = ConsentApproval{Scopes: append([]string(nil), r.Scopes...), IDTokenClaims: append([]string(nil), r.Claims.IDToken...), UserInfoClaims: append([]string(nil), r.Claims.UserInfo...), ApprovedAt: time.Now()}
+	}
 	delete(f.requests, hashKey(rh))
 	return g, nil
 }

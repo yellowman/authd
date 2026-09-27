@@ -37,6 +37,7 @@ type Store interface {
 	PublicOriginAllowed(context.Context, string) (bool, error)
 	CreateAuthorizationRequest(context.Context, []byte, AuthorizationRequest) error
 	AuthorizationRequest(context.Context, []byte) (AuthorizationRequest, Client, error)
+	ConsentApproval(context.Context, []byte, string) (ConsentApproval, error)
 	ConsentAuthorizationRequest(context.Context, []byte, []byte, []byte, bool, identity.Audit) error
 	IssueAuthorizationCode(context.Context, []byte, []byte, []byte, []byte, time.Time) (CodeGrant, error)
 	// The issuer runs inside the grant transaction and MUST NOT perform database I/O.

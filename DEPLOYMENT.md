@@ -720,3 +720,17 @@ install/start upgrade procedure. Run migration with the deployment's migration
 credential, not the service's restricted runtime credential. No new environment
 variable or image directory is needed. The initial name remains `authd`, with no
 custom logo. Administrators configure it under **Login appearance**.
+
+## Consent approval migration
+
+This release adds migration `010_consent_approvals.sql`. Stop the daemon, back
+up the database, run the new binary's `authd migrate` with the migration
+credential, refresh runtime grants, then install and start using the normal
+upgrade procedure. The runtime account needs access to the new table; do not
+run the service with the migration credential.
+
+Approval history starts empty. Existing sessions, roles, and audit events are
+not evidence of reviewed access and are not backfilled. Each completed explicit
+approval saves the last reviewed request for that person and application.
+No configuration change, secret rotation, or client-protocol extension is
+required. Saved history does not grant permissions or skip `prompt=consent`.

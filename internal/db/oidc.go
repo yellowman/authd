@@ -310,6 +310,11 @@ func (s *OIDCStore) IssueAuthorizationCode(ctx context.Context, requestHash, bro
 		if e != nil {
 			return e
 		}
+		if req.ConsentSessionID == sess.ID {
+			if e = saveConsentApprovalTx(ctx, tx, subject.ID, client.ID, req); e != nil {
+				return e
+			}
+		}
 		if _, e = tx.ExecContext(ctx, `DELETE FROM authorization_requests WHERE request_hash=$1`, requestHash); e != nil {
 			return e
 		}
