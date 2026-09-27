@@ -76,6 +76,12 @@ Avoid a dashboard home full of metric cards. The admin landing page is a generic
 adding-an-app procedure with links to the relevant controls and documentation
 portal, not an operational-summary dashboard.
 
+Permission scopes use their dot-separated hierarchy in the catalog and in role
+and client editors. Each level is a native disclosure row; the name itself is
+only navigation unless an exact permission exists at that level. Editing a
+permission or a selected role/client opens its containing branches. Keep full
+scope names visible on leaf rows so the grant is unambiguous.
+
 On small screens retain the slim rail with its own vertical scrolling area. Keep
 the mark and account link reachable; section text links provide a labeled
 alternative to icon navigation.

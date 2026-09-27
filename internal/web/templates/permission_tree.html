@@ -1,0 +1,39 @@
+{{define "permission-catalog-node"}}
+  {{range .}}
+    {{if .Children}}
+      <details class="permission-branch" {{if .Open}}open{{end}}>
+        <summary><code>{{.Label}}</code><span class="muted small">{{.Count}} scopes</span></summary>
+        <div class="permission-children">
+          {{if .Permission}}{{template "permission-catalog-leaf" .Permission}}{{end}}
+          {{template "permission-catalog-node" .Children}}
+        </div>
+      </details>
+    {{else if .Permission}}
+      {{template "permission-catalog-leaf" .Permission}}
+    {{end}}
+  {{end}}
+{{end}}
+
+{{define "permission-catalog-leaf"}}
+  <div class="permission-leaf"><code>{{.Name}}</code><span class="muted">{{.Description}}</span><a href="/admin/?permission={{.ID}}#permission-editor">Edit</a></div>
+{{end}}
+
+{{define "permission-options-node"}}
+  {{range .}}
+    {{if .Children}}
+      <details class="permission-branch" {{if .Open}}open{{end}}>
+        <summary><code>{{.Label}}</code><span class="muted small">{{.Count}} scopes</span></summary>
+        <div class="permission-children">
+          {{if .Permission}}{{template "permission-option" .}}{{end}}
+          {{template "permission-options-node" .Children}}
+        </div>
+      </details>
+    {{else if .Permission}}
+      {{template "permission-option" .}}
+    {{end}}
+  {{end}}
+{{end}}
+
+{{define "permission-option"}}
+  <label class="check permission-option"><input type="checkbox" name="permissions" value="{{.Permission.ID}}" {{if .Checked}}checked{{end}}><span><code>{{.Permission.Name}}</code>{{if .Permission.Description}}<small class="block muted">{{.Permission.Description}}</small>{{end}}</span></label>
+{{end}}

@@ -365,6 +365,29 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		d.View = "permissions"
 	}
+	if d.View == "permissions" || d.View == "roles" || d.View == "clients" {
+		permissions := data.Permissions
+		var selectedID string
+		var checkedIDs []string
+		if d.SelectedPermission != nil {
+			selectedID = d.SelectedPermission.ID
+		}
+		if d.SelectedRole != nil {
+			checkedIDs = d.SelectedRole.PermissionIDs
+		}
+		if d.SelectedClient != nil {
+			checkedIDs = d.SelectedClient.PermissionIDs
+		}
+		if d.View == "clients" {
+			permissions = make([]identity.Permission, 0, len(data.Permissions))
+			for _, permission := range data.Permissions {
+				if permission.Name != "system.admin" {
+					permissions = append(permissions, permission)
+				}
+			}
+		}
+		d.PermissionTree = permissionTree(permissions, selectedID, checkedIDs)
+	}
 	if d.View == "guide" {
 		s.startDocument(&d)
 	}

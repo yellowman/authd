@@ -219,6 +219,17 @@ legend { padding:0 5px; font-size:12px; color:var(--muted); }
 .choices { display:flex; flex-wrap:wrap; gap:8px 20px; }
 .check { display:flex; align-items:center; gap:8px; min-height:28px; }
 .check input { width:16px; height:16px; margin:0; flex-shrink:0; }
+.permission-tree { border-top:1px solid var(--line); }
+.permission-branch summary { padding:9px 14px; border-bottom:1px solid var(--line); font-weight:600; }
+.permission-branch summary::marker { color:var(--muted); }
+.permission-branch summary .small { margin-left:10px; font-weight:400; }
+.permission-branch[open] > summary { background:var(--surface-2); }
+.permission-children { margin-left:18px; border-left:1px solid var(--line); }
+.permission-leaf { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) auto; gap:12px; align-items:start; padding:9px 14px; border-bottom:1px solid var(--line); }
+.permission-leaf > a { white-space:nowrap; }
+.permission-option { padding:8px 14px; border-bottom:1px solid var(--line); }
+.permission-option > span { min-width:0; }
+#permission-editor { scroll-margin-top:16px; }
 .table-wrap { overflow-x:auto; max-width:100%; overscroll-behavior-x:contain; }
 table { width:100%; min-width:640px; border-collapse:collapse; text-align:left; }
 th { font-size:11px; color:var(--muted); font-weight:600; background:var(--surface-2); }
@@ -243,6 +254,7 @@ summary { cursor:pointer; min-height:32px; padding:5px 0; }
 .skip-link { position:absolute; left:-1000px; top:0; background:var(--surface); padding:12px; z-index:5; }
 .skip-link:focus { left:0; }
 @media(max-width:600px) { .form-grid { grid-template-columns:1fr; } .form-body { padding:14px; } .simple-page { padding-top:26px; } .section-heading { gap:10px; flex-wrap:wrap; } th,td { padding:9px 10px; } }
+@media(max-width:600px) { .permission-leaf { grid-template-columns:minmax(0,1fr) auto; } .permission-leaf .muted { grid-column:1 / -1; } .permission-leaf > a { grid-column:2; grid-row:1; } }
 
 /* Operator guidance is an ordinary section, not a dashboard or an overlay. */
 h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.45; }

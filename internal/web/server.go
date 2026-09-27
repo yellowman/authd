@@ -58,6 +58,7 @@ type pageData struct {
 	Development                                                                                                                  bool
 	Session                                                                                                                      identity.Session
 	Admin                                                                                                                        identity.AdminData
+	PermissionTree                                                                                                               []*permissionNode
 	Sessions                                                                                                                     []identity.Session
 	SelectedUser                                                                                                                 *identity.User
 	SelectedRole                                                                                                                 *identity.Role
