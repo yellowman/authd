@@ -8,7 +8,6 @@ import (
 type consentScopeNode struct {
 	Label, Scope, Description string
 	Count                     int
-	Open                      bool
 	Children                  []*consentScopeNode
 }
 
@@ -29,9 +28,9 @@ func compareConsent(scopes, claims []string, previous ConsentApproval) *consentC
 		view.ApprovedAt = previous.ApprovedAt.UTC().Format("Jan 2, 2006, 15:04 UTC")
 	}
 	added, unchanged, omitted := consentDiff(scopes, previousScopes)
-	view.NewScopes = groupConsentScopes(added, true)
-	view.ApprovedScopes = groupConsentScopes(unchanged, false)
-	view.NotRequestedScopes = groupConsentScopes(omitted, false)
+	view.NewScopes = groupConsentScopes(added)
+	view.ApprovedScopes = groupConsentScopes(unchanged)
+	view.NotRequestedScopes = groupConsentScopes(omitted)
 	view.NewClaims, view.ApprovedClaims, view.NotRequestedClaims = consentDiff(claims, previousClaims)
 	view.NewCount = len(added) + len(view.NewClaims)
 	view.ApprovedCount = len(unchanged) + len(view.ApprovedClaims)
@@ -66,7 +65,7 @@ func consentDiff(current, previous []string) (added, unchanged, omitted []string
 	return
 }
 
-func groupConsentScopes(scopes []string, open bool) []*consentScopeNode {
+func groupConsentScopes(scopes []string) []*consentScopeNode {
 	root := &consentScopeNode{}
 	index := map[string]*consentScopeNode{}
 	for _, scope := range scopes {
@@ -78,7 +77,7 @@ func groupConsentScopes(scopes []string, open bool) []*consentScopeNode {
 			path += label
 			node := index[path]
 			if node == nil {
-				node = &consentScopeNode{Label: label, Open: open}
+				node = &consentScopeNode{Label: label}
 				index[path] = node
 				parent.Children = append(parent.Children, node)
 			}

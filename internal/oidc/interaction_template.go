@@ -6,8 +6,8 @@ var interactionTemplate = template.Must(template.New("interaction").Parse(`
 {{define "scope-node"}}
   {{range .}}
     {{if .Children}}
-      <details class="permission-branch" {{if .Open}}open{{end}}>
-        <summary><code>{{.Label}}</code><span class="muted small">{{.Count}} scopes</span></summary>
+      <details class="permission-branch">
+        <summary><code>{{.Label}}</code> <span class="muted small">{{.Count}} scopes</span></summary>
         <div class="permission-children">
           {{if .Scope}}{{template "scope-leaf" .}}{{end}}
           {{template "scope-node" .Children}}

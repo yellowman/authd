@@ -57,8 +57,9 @@ Keep setup consequences beside confirmation, not as the account-page intro.
 ### Application consent
 
 Consent uses a wider work surface than sign-in. Show new access first, group
-dot-separated scopes with native disclosure rows, and collapse previously
-approved access. State clearly when nothing changed. Keep standard identity
+dot-separated scopes with native disclosure rows collapsed by default, including
+new scopes, and collapse previously approved access. Keep group names and scope
+counts visible. State clearly when nothing changed. Keep standard identity
 scope explanations, but explain application-defined permissions once instead
 of repeating the same sentence beside every scope. Label omitted access as
 **Not requested this time**, not revoked. Retain one primary Allow action,

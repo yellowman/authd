@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,8 +36,8 @@ func TestConsentComparisonTracksChanges(t *testing.T) {
 
 func TestConsentScopeHierarchyKeepsExactScopes(t *testing.T) {
 	added, _, _ := consentDiff([]string{"inventory", "inventory.assets.read", "inventory.assets.write", "profile"}, nil)
-	nodes := groupConsentScopes(added, true)
-	if len(nodes) != 2 || nodes[0].Label != "inventory" || nodes[0].Count != 3 || nodes[0].Scope != "inventory" || !nodes[0].Open {
+	nodes := groupConsentScopes(added)
+	if len(nodes) != 2 || nodes[0].Label != "inventory" || nodes[0].Count != 3 || nodes[0].Scope != "inventory" {
 		t.Fatal("root scope or hierarchy lost", nodes)
 	}
 	assets := nodes[0].Children[0]
@@ -73,6 +74,35 @@ func TestConsentPresentationIsWideGroupedAndEscaped(t *testing.T) {
 	h.interaction(w, httptest.NewRequest("GET", "/authorize/resume", nil), view)
 	if !strings.Contains(w.Body.String(), "No access changes.") || !strings.Contains(w.Body.String(), "Allow and continue") {
 		t.Fatal("unchanged explicit consent lost its decision")
+	}
+}
+
+func TestConsentScopeGroupsStartCollapsed(t *testing.T) {
+	h, _, _, _, _, _ := providerFixture(t)
+	scopes := []string{"openid", "email", "profile", "offline_access"}
+	for i := 0; i < 25; i++ {
+		scopes = append(scopes, fmt.Sprintf("inventory.assets.permission%d", i))
+	}
+	for _, previous := range []ConsentApproval{{}, {Scopes: []string{"openid", "inventory.assets.old"}, ApprovedAt: time.Now()}} {
+		w := httptest.NewRecorder()
+		h.interaction(w, httptest.NewRequest("GET", "/authorize/resume", nil), interactionView{Action: "/authorize/consent", Scopes: scopes, PreviousApproval: previous})
+		body := w.Body.String()
+		if !strings.Contains(body, `<code>inventory</code>`) || !strings.Contains(body, "25 scopes") {
+			t.Fatal("application scope group or count missing")
+		}
+		for _, section := range strings.Split(body, "<details")[1:] {
+			attributes := strings.SplitN(section, ">", 2)[0]
+			for _, attribute := range strings.Fields(attributes) {
+				if attribute == "open" || strings.HasPrefix(attribute, "open=") {
+					t.Fatal("consent scope group expanded by default", attributes)
+				}
+			}
+		}
+		for _, scope := range []string{"email", "offline_access", "profile"} {
+			if !strings.Contains(body, ScopeDescription(scope)) {
+				t.Fatal("standard identity scope explanation lost", scope)
+			}
+		}
 	}
 }
 
