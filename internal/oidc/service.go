@@ -241,9 +241,10 @@ func (s *Service) BeginAuthorization(ctx context.Context, values map[string][]st
 		}
 		req.ExpectedSubjects = []string{subject}
 	}
-	// No blanket administrative-consent fiction for offline access. Without an
-	// explicit consent prompt this request is ignored as OIDC Core 11 requires.
-	if contains(req.Scopes, "offline_access") && (!hasPrompt(req, "consent") || !contains(req.Scopes, "openid") || !client.RefreshTokensEnabled) {
+	// Offline access requires either explicit consent for this request or a
+	// stored approval covering its exact scopes/claim targets. Both the live
+	// continuation and code transaction enforce that before issuing a grant.
+	if contains(req.Scopes, "offline_access") && (!contains(req.Scopes, "openid") || !client.RefreshTokensEnabled) {
 		filtered := make([]string, 0, len(req.Scopes))
 		for _, v := range req.Scopes {
 			if v != "offline_access" {
@@ -318,7 +319,17 @@ func (s *Service) ContinueAuthorization(ctx context.Context, requestRaw, browser
 	if !subjectCanGrant(session, client, req.Scopes) || scopeAllowed(client, req.Scopes) != nil || !ClientAllowsClaims(client, req.Claims) {
 		return s.authRedirect(req, "", "access_denied"), false, ErrAccessDenied
 	}
-	if ConsentNeeded(req, session.ID) {
+	var approval ConsentApproval
+	if contains(req.Scopes, "offline_access") && !hasPrompt(req, "consent") && req.ConsentSessionID != session.ID {
+		approval, err = s.Store.ConsentApproval(ctx, identity.Hash(sessionRaw), client.ID)
+		if err != nil {
+			return "", false, err
+		}
+	}
+	if ConsentNeeded(req, session.ID, approval) {
+		if hasPrompt(req, "none") {
+			return s.authRedirect(req, "", "consent_required"), false, ErrConsentRequired
+		}
 		return "", false, ErrConsentRequired
 	}
 	code, err := cryptoutil.RandomToken(32)

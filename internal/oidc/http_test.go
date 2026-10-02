@@ -121,7 +121,7 @@ func (f *fakeOIDCStore) IssueAuthorizationCode(_ context.Context, rh, bh, sh, ch
 	if !ok || !AuthenticationFresh(r, sess.AuthTime, time.Now()) {
 		return CodeGrant{}, ErrLoginRequired
 	}
-	if ConsentNeeded(r, sess.ID) {
+	if ConsentNeeded(r, sess.ID, f.approvals[sess.User.ID+"\x00"+f.client.ID]) {
 		return CodeGrant{}, ErrConsentRequired
 	}
 	subject := Subject{ID: sess.User.ID, SessionID: sess.ID, Username: sess.User.Username, DisplayName: sess.User.DisplayName, Email: sess.User.Email, EmailVerified: sess.User.EmailVerified, Enabled: true, Roles: sess.Roles, Permissions: sess.Permissions, AuthTime: sess.AuthTime, AuthMethods: sess.AuthMethods, ACR: ResultACR(r, sess.AuthMethods)}
@@ -737,10 +737,11 @@ func approveTestConsent(t *testing.T, h *HTTP, w *httptest.ResponseRecorder, ses
 	}
 	w = httptest.NewRecorder()
 	muxFor(h).ServeHTTP(w, r)
-	if w.Code != 303 {
-		t.Fatalf("consent: %d %s", w.Code, w.Body.String())
+	if w.Code != 200 || w.Header().Get("Location") != "" {
+		t.Fatalf("consent handoff: %d %s", w.Code, w.Body.String())
 	}
-	r = httptest.NewRequest("GET", "https://auth.example.test"+w.Header().Get("Location"), nil)
+	target := formRedirectTarget(t, w.Body.String())
+	r = httptest.NewRequest("GET", "https://auth.example.test"+target, nil)
 	r.AddCookie(&http.Cookie{Name: "__Host-authd_session", Value: sessionRaw})
 	for _, c := range cookies {
 		r.AddCookie(c)
@@ -1088,4 +1089,14 @@ func TestLogoutHintForDifferentSIDDoesNotEndCurrentSession(t *testing.T) {
 	if w.Code != http.StatusOK || w.Header().Get("Location") != "" || sessions.ended {
 		t.Fatalf("cross-sid logout accepted: status=%d location=%q ended=%v", w.Code, w.Header().Get("Location"), sessions.ended)
 	}
+}
+
+func formRedirectTarget(t *testing.T, body string) string {
+	t.Helper()
+	prefix := `content="0;url=`
+	start := strings.Index(body, prefix)
+	if start < 0 {
+		t.Fatal("missing document continuation")
+	}
+	return html.UnescapeString(strings.SplitN(body[start+len(prefix):], `"`, 2)[0])
 }

@@ -315,7 +315,7 @@ func (h *HTTP) continueAuthorization(w http.ResponseWriter, r *http.Request, raw
 		http.Redirect(w, r, "/login?oidc="+url.QueryEscape(raw), http.StatusSeeOther)
 		return
 	}
-	if errors.Is(err, ErrConsentRequired) {
+	if errors.Is(err, ErrConsentRequired) && location == "" {
 		h.renderConsent(w, r, raw, browser)
 		return
 	}

@@ -77,15 +77,19 @@ the application must define its own admission rule.
 
 Refresh is optional and off by default. Dynamic clients opt in with standard
 `grant_types: ["authorization_code", "refresh_token"]` and `offline_access`
-in `scope`; request `prompt=consent` during login. This is OAuth/OIDC behavior,
+in `scope`. Normal login reuses the same person’s stored approval for this
+client when it covers every requested scope and claim target. First use and
+new access require an explicit decision. `prompt=consent` deliberately asks
+for another decision even for unchanged access. This is OAuth/OIDC behavior,
 not the authd-specific role/group-template extension. Older authd versions
 reject the opt-in, and other providers may grant less than requested: inspect
 the returned registration metadata and token response.
 
 authd compares each consent request with the person's last explicit approval
 for that client. New access is shown first; prior access can be expanded.
-This changes only the provider's presentation, not the standard client flow,
-granted scopes, or the meaning of `prompt=consent`.
+Saved approval permits unchanged offline access; live sessions, roles, client
+policy and granted scopes are still checked again when a code is issued.
+It never overrides the meaning of `prompt=consent`.
 
 Without refresh, end the application's session when its access token expires.
 With refresh, keep a separately bounded local session, but allow operations

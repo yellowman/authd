@@ -99,10 +99,10 @@ func (h *HTTP) consent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allow {
-		http.Redirect(w, r, h.service.authRedirect(req, "", "access_denied"), http.StatusFound)
+		RedirectFromForm(w, r, h.service.authRedirect(req, "", "access_denied"))
 		return
 	}
-	http.Redirect(w, r, "/authorize/resume?flow="+url.QueryEscape(flow), http.StatusSeeOther)
+	RedirectFromForm(w, r, "/authorize/resume?flow="+url.QueryEscape(flow))
 }
 
 func (h *HTTP) logoutCSRF(values url.Values, session string) string {

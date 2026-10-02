@@ -101,8 +101,8 @@ func TestOfflineAccessRequiresConsent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if contains(req.Scopes, "offline_access") != (prompt == "consent") {
-			t.Fatalf("offline scope retained without consent: %q", prompt)
+		if !contains(req.Scopes, "offline_access") || !ConsentNeeded(req, "session", ConsentApproval{}) {
+			t.Fatalf("offline access can escape consent enforcement: %q", prompt)
 		}
 	}
 }
@@ -181,8 +181,8 @@ func TestConsentCSRFAndDenial(t *testing.T) {
 		t.Fatal("consent form was not browser-bound")
 	}
 	got := post(true)
-	u, _ := url.Parse(got.Header().Get("Location"))
-	if got.Code != 302 || u.Query().Get("error") != "access_denied" || len(store.codes) != 0 || len(store.requests) != 0 {
+	u, _ := url.Parse(formRedirectTarget(t, got.Body.String()))
+	if got.Code != 200 || got.Header().Get("Location") != "" || u.Query().Get("error") != "access_denied" || len(store.codes) != 0 || len(store.requests) != 0 {
 		t.Fatalf("consent denial had side effects or wrong redirect: %d %s", got.Code, u)
 	}
 }

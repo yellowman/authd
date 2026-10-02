@@ -127,11 +127,12 @@ requested OAuth scopes, never a claim supplied by the browser.
 
 ## Offline access and refresh serialization
 
-For a manually configured client, request `openid offline_access` **and
-`prompt=consent`**, and configure that client
-to permit refresh tokens. The user must approve the browser-bound consent page.
-Without explicit consent, authd drops `offline_access` and issues no refresh
-credential. Dynamically registered clients can opt in with standard
+For a manually configured client, request `openid offline_access` and configure
+that client to permit refresh tokens. The user explicitly approves first use
+or expanded access. Later sign-ins can reuse that person's stored approval for
+the same client, scopes and claim targets. Send `prompt=consent` when a fresh
+decision is intended. Without either matching stored approval or a decision
+bound to this request/session, no offline refresh credential is issued. Dynamically registered clients can opt in with standard
 `grant_types: ["authorization_code", "refresh_token"]` and `offline_access`
 in registration `scope`; refresh remains off by default. See
 [the client guide](APP_CREATOR_OIDC.md#optional-server-side-refresh) for managed

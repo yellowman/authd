@@ -206,8 +206,8 @@ def run(manifest: dict[str, str]) -> None:
                 assert page.get_by_role("heading", name="Authorize application").count() == 1
                 assert "Share your assigned authd role names." in page.locator("body").inner_text()
                 viewport_check("consent-1440")
-                submit("/authorize/consent", 'button[name="decision"][value="allow"]', 303)
-                page.wait_for_url(origin + "/auth/callback?*")
+                submit("/authorize/consent", 'button[name="decision"][value="allow"]', 200)
+                page.wait_for_url(manifest["callback"] + "?*")
                 assert page.get_by_role("heading", name="Callback received").count() == 1
                 page.goto(origin + "/logout")
                 viewport_check("logout-1440")

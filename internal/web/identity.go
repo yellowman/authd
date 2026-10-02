@@ -114,7 +114,7 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if raw := r.PostForm.Get("oidc_request"); raw != "" {
 		if _, _, ok := s.oidc.Pending(r.Context(), raw, s.cookie(r, "oidc_browser")); ok {
-			http.Redirect(w, r, "/authorize/resume?flow="+url.QueryEscape(raw), http.StatusSeeOther)
+			oidc.RedirectFromForm(w, r, "/authorize/resume?flow="+url.QueryEscape(raw))
 			return
 		}
 	}

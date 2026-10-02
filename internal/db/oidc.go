@@ -290,7 +290,11 @@ func (s *OIDCStore) IssueAuthorizationCode(ctx context.Context, requestHash, bro
 		if !meetsACRDB(sess.AuthMethods, req.RequiredACR) || (client.RequireMFA && !meetsACRDB(sess.AuthMethods, oidc.ACRMFA)) {
 			return oidc.ErrUnmetAuthn
 		}
-		if oidc.ConsentNeeded(req, sess.ID) {
+		prior, e := consentApprovalTx(ctx, tx, sess.User.ID, client.ID)
+		if e != nil {
+			return e
+		}
+		if oidc.ConsentNeeded(req, sess.ID, prior) {
 			return oidc.ErrConsentRequired
 		}
 		subject := subjectFromSession(sess)

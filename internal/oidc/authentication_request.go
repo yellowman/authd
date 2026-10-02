@@ -185,8 +185,29 @@ func AuthenticationFresh(req AuthorizationRequest, authenticated, now time.Time)
 	}
 	return true
 }
-func ConsentNeeded(req AuthorizationRequest, sessionID string) bool {
-	return hasPrompt(req, "consent") && req.ConsentSessionID != sessionID
+func ConsentNeeded(req AuthorizationRequest, sessionID string, prior ConsentApproval) bool {
+	if req.ConsentSessionID == sessionID && sessionID != "" {
+		return false
+	}
+	if hasPrompt(req, "consent") {
+		return true
+	}
+	if !contains(req.Scopes, "offline_access") {
+		return false
+	}
+	if prior.ApprovedAt.IsZero() {
+		return true
+	}
+	for _, pair := range []struct{ requested, approved []string }{
+		{req.Scopes, prior.Scopes}, {req.Claims.IDToken, prior.IDTokenClaims}, {req.Claims.UserInfo, prior.UserInfoClaims},
+	} {
+		for _, value := range pair.requested {
+			if !contains(pair.approved, value) {
+				return true
+			}
+		}
+	}
+	return false
 }
 func ResultACR(req AuthorizationRequest, methods []string) string {
 	// An essential selector is an exact claim-value promise. A stronger ceremony

@@ -44,6 +44,15 @@ func TestPostgresConsentApprovalHistory(t *testing.T) {
 	if first.ApprovedAt.IsZero() || !slices.Equal(first.Scopes, scopes) || !slices.Equal(first.IDTokenClaims, claims.IDToken) || !slices.Equal(first.UserInfoClaims, claims.UserInfo) {
 		t.Fatal("completed consent not persisted", first)
 	}
+	// The code transaction must recheck the persisted approval, rather than
+	// trusting a service's earlier continuation decision.
+	rh, bh = create(scopes, claims, "")
+	_, err = store.IssueAuthorizationCode(ctx, rh, bh, actor.TokenHash, identity.Hash(token(t)), time.Now().Add(50*time.Second))
+	require(t, err)
+	rh, bh = create(scopes, oidc.ClaimSelection{IDToken: []string{"preferred_username"}}, "")
+	if _, err = store.IssueAuthorizationCode(ctx, rh, bh, actor.TokenHash, identity.Hash(token(t)), time.Now().Add(50*time.Second)); !errors.Is(err, oidc.ErrConsentRequired) {
+		t.Fatal("new offline claim bypassed the transactional consent gate", err)
+	}
 	for _, decision := range []string{"deny", "failed-code", "no-consent"} {
 		prompt := "consent"
 		if decision == "no-consent" {

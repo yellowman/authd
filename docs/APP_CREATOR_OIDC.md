@@ -195,8 +195,9 @@ window is the remaining access-token lifetime, not the longer cookie lifetime.
    can opt in using the full metadata `PUT` described in section 7. No schema
    upgrade or new client secret is needed just for this opt-in.
 2. Start the normal Code + S256 PKCE flow with `scope` including
-   `offline_access` and `prompt=consent`. authd requires explicit consent;
-   without it, offline access is removed. Inspect the actual token response:
+   `offline_access`. authd obtains explicit approval on first use or when
+   scopes/claim targets expand, and reuses matching stored approval on later
+   sign-ins. Send `prompt=consent` only to force another decision. Inspect the actual token response:
    requesting refresh does not guarantee receiving a `refresh_token`.
 3. Keep the refresh credential in protected backend storage, never in browser
    JavaScript, URLs, logs, or the session cookie. Send a form-encoded request to
@@ -227,7 +228,8 @@ window is the remaining access-token lifetime, not the longer cookie lifetime.
 authd's consent screen compares the request with that person's last explicit
 approval for the client: additions are prominent, prior access is collapsed,
 and omitted items are labeled as not requested rather than revoked. This is
-presentation history, not a permission grant or a bypass of `prompt=consent`.
+also used to recognize unchanged offline requests. It is never a permission
+grant or a bypass of `prompt=consent`; live policy is checked at code issuance.
 An upgrade starts with no recorded approvals. Standard clients need no new
 endpoint, parameter, or authd extension for this comparison.
 

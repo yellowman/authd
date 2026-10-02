@@ -56,8 +56,8 @@ type AuthorizationRequest struct {
 	ExpiresAt     time.Time
 }
 
-// ConsentApproval remembers the last explicitly reviewed request. It is only a
-// presentation baseline: live roles/client policy still determine issued scopes,
+// ConsentApproval remembers the last explicitly reviewed request. It can
+// satisfy an unchanged offline request; live policy still determines scopes,
 // and prompt=consent still requires a fresh decision for the current request.
 type ConsentApproval struct {
 	Scopes         []string
